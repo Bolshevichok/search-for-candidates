@@ -43,7 +43,7 @@ older copy of this file with different IDs, discard it.
   `contracts/cli-contract.md`
 - [x] T004 [P] Create `.env.example` at repo root with a `VK_TOKEN=` placeholder (unused this
   feature, reserved per `constitution.md` → Technology Constraints)
-- [ ] T005 [P] Update `.gitignore` for `data/state.sqlite`, `data/backups/`, `data/raw/`,
+- [x] T005 [P] Update `.gitignore` for `data/state.sqlite`, `data/backups/`, `data/raw/`,
   `output/`, `logs/`
 - [ ] T006 [P] Create empty scaffold modules `app/sources/universities/layer2.py` and
   `app/vk/__init__.py` with docstrings describing their future input/output contract per
