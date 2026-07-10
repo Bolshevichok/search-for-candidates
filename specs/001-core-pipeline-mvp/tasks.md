@@ -45,7 +45,7 @@ older copy of this file with different IDs, discard it.
   feature, reserved per `constitution.md` → Technology Constraints)
 - [x] T005 [P] Update `.gitignore` for `data/state.sqlite`, `data/backups/`, `data/raw/`,
   `output/`, `logs/`
-- [ ] T006 [P] Create empty scaffold modules `app/sources/universities/layer2.py` and
+- [x] T006 [P] Create empty scaffold modules `app/sources/universities/layer2.py` and
   `app/vk/__init__.py` with docstrings describing their future input/output contract per
   `contracts/future-layer2-vk-stub-contract.md` (FR-015). No crawling/AI-parsing/VK-API logic, no
   import from `app/cli.py` — this task only satisfies the "scaffold exists" half of FR-015; the
