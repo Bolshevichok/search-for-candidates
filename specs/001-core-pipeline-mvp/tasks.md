@@ -135,7 +135,7 @@ HTTP client, shared normalization.
   spec.md US1 Acceptance Scenario 3). In the same checkpoint write, compute a hash of the raw
   `/sveden/employees` content pulled for that university and store it as
   `run_steps.university_site_hash` (FR-017) — this task is the only place that field gets written
-- [ ] T022 [US1] Wire `app step layer1` and the `layer1` stage of `app run` in `app/cli.py` to
+- [x] T022 [US1] Wire `app step layer1` and the `layer1` stage of `app run` in `app/cli.py` to
   T018–T021
 
 **Checkpoint**: User Story 1 is independently functional and testable via `quickstart.md` Scenario 1.

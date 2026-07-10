@@ -4,34 +4,83 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
-from app.config import AppConfig, StepNotImplementedError, load_config
-from app.db.repository import DEFAULT_DB_PATH, Repository, open_repository
+from app.config import StepNotImplementedError, load_config
+from app.db.repository import DEFAULT_DB_PATH, backup_state, open_repository
+from app.export.xlsx import default_output_path, export_xlsx
+from app.matching.matcher import run_match
+from app.registry.loader import load_registry
+from app.sources.universities.layer1 import run_layer1
+from app.sources.vak.pipeline import run_vak
 
 
-def _placeholder_step(name: str) -> None:
-  print(f"Step '{name}' is not wired yet.")
+def _ensure_run(repo, *, is_full: bool) -> int:
+  if is_full:
+    return repo.create_run(is_full=True)
+  existing = repo.find_resumable_run()
+  if existing:
+    return existing
+  return repo.create_run(is_full=False)
+
+
+def _prepare_run(repo, cfg, *, is_full: bool) -> int:
+  run_id = _ensure_run(repo, is_full=is_full)
+  if repo.count_table("universities") == 0:
+    load_registry(repo)
+  return run_id
 
 
 def cmd_run(args: argparse.Namespace) -> int:
   cfg = load_config(args.config)
   cfg.validate_implemented_steps()
   with open_repository(args.db) as repo:
-    run_id = repo.create_run(is_full=args.full)
-    print(f"Created run {run_id} (placeholder orchestration).")
+    run_id = _prepare_run(repo, cfg, is_full=args.full)
+    if cfg.run.layer1:
+      run_layer1(
+        repo,
+        run_id,
+        request_delay_sec=cfg.limits.request_delay_sec,
+        max_universities=cfg.limits.max_universities,
+      )
+    if cfg.run.vak:
+      run_vak(repo, run_id, request_delay_sec=0.0)
+    if cfg.run.match:
+      run_match(repo, run_id)
+    out = Path(args.out) if args.out else default_output_path()
+    export_xlsx(repo, out)
+    repo.mark_step_done(run_id, "export", None)
+    repo.finish_run(run_id, "success")
+    backup_state("post_run", db_path=args.db)
+    print(f"Run {run_id} completed. Export: {out}")
   return 0
 
 
 def cmd_step(args: argparse.Namespace) -> int:
-  load_config(args.config)
-  _placeholder_step(args.step_name)
+  cfg = load_config(args.config)
+  with open_repository(args.db) as repo:
+    run_id = _prepare_run(repo, cfg, is_full=False)
+    if args.step_name == "layer1":
+      run_layer1(
+        repo,
+        run_id,
+        request_delay_sec=cfg.limits.request_delay_sec,
+        max_universities=cfg.limits.max_universities,
+      )
+    elif args.step_name == "vak":
+      run_vak(repo, run_id)
+    elif args.step_name == "match":
+      run_match(repo, run_id)
+    print(f"Step {args.step_name} completed for run {run_id}.")
   return 0
 
 
 def cmd_export(args: argparse.Namespace) -> int:
   out = Path(args.out)
-  print(f"Export to {out} is not wired yet.")
+  with open_repository(args.db, init=False) as repo:
+    export_xlsx(repo, out)
+  print(f"Exported to {out}")
   return 0
 
 
@@ -57,13 +106,12 @@ def cmd_status(args: argparse.Namespace) -> int:
       "SELECT status, finished_at FROM runs ORDER BY run_id DESC LIMIT 1"
     ).fetchone()
     if last:
-      print(f"Last run status: {last['status']}, finished_at: {last['finished_at']}")
+      state = "finished" if last["finished_at"] else "interrupted"
+      print(f"Last run status: {last['status']} ({state})")
   return 0
 
 
 def cmd_reset(args: argparse.Namespace) -> int:
-  from app.db.repository import backup_state
-
   backup_state("reset", db_path=args.db)
   if Path(args.db).exists():
     with open_repository(args.db) as repo:
@@ -80,6 +128,7 @@ def build_parser() -> argparse.ArgumentParser:
 
   p_run = sub.add_parser("run", help="Run full pipeline")
   p_run.add_argument("--full", action="store_true", help="Force full rebuild")
+  p_run.add_argument("--out", default=None, help="Output xlsx path")
   p_run.set_defaults(func=cmd_run)
 
   p_step = sub.add_parser("step", help="Run a single step")
