@@ -32,7 +32,7 @@ older copy of this file with different IDs, discard it.
 
 **Purpose**: Project skeleton and dependency manifest — nothing here is business logic.
 
-- [ ] T001 Create package skeleton per `plan.md` → Project Structure: `app/__init__.py`,
+- [x] T001 Create package skeleton per `plan.md` → Project Structure: `app/__init__.py`,
   `app/sources/vak/__init__.py`, `app/sources/universities/__init__.py`,
   `app/matching/__init__.py`, `app/vk/__init__.py`, `app/export/__init__.py`, `app/db/__init__.py`,
   plus empty `data/raw/.gitkeep`, `output/.gitkeep`, `logs/.gitkeep`, `tests/unit/__init__.py`
