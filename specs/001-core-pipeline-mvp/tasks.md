@@ -67,7 +67,7 @@ HTTP client, shared normalization.
   `candidates`, `possible_namesakes`, `runs`, `run_steps` per `data-model.md` (deliberately no
   `contacts`/`vk_hits` tables — see `data-model.md` intro note). `candidates.candidate_id` is
   `TEXT` (format `c_<zero-padded-number>`), not `INTEGER` — see `data-model.md` for rationale
-- [ ] T008 Implement `app/db/repository.py`: open/init `data/state.sqlite` from `schema.sql`,
+- [x] T008 Implement `app/db/repository.py`: open/init `data/state.sqlite` from `schema.sql`,
   generic upsert helpers, run/run_step checkpoint helpers (`create_run`, `mark_step_done`,
   `mark_step_error`, `find_resumable_run`) per `data-model.md` → `runs`/`run_steps`, and a single
   shared `backup_state(reason: str)` helper (copies `data/state.sqlite` to
