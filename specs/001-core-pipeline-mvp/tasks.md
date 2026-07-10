@@ -73,7 +73,7 @@ HTTP client, shared normalization.
   shared `backup_state(reason: str)` helper (copies `data/state.sqlite` to
   `data/backups/state_<run_id>.sqlite`, rotates to keep only the last N) — reused by both the
   `reset` and post-`run` backup call sites (T038/T039) instead of duplicating the logic
-- [ ] T009 [P] Implement `app/config.py`: load `config.yaml` + `.env`; if `run.layer2` or `run.vk`
+- [x] T009 [P] Implement `app/config.py`: load `config.yaml` + `.env`; if `run.layer2` or `run.vk`
   is `true`, raise a clear "step not implemented" error immediately (FR-016)
 - [ ] T010 [P] Implement `app/matching/normalize.py`: FIO normalization (case, `ё→е`, whitespace,
   hyphen spacing in double surnames) and organization-name normalization — shared by layer1 (US1)
