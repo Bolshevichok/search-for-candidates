@@ -38,7 +38,7 @@ older copy of this file with different IDs, discard it.
   plus empty `data/raw/.gitkeep`, `output/.gitkeep`, `logs/.gitkeep`, `tests/unit/__init__.py`
 - [x] T002 [P] Create dependency manifest `pyproject.toml` listing `httpx`, `lxml`, `selectolax`,
   `openpyxl`, `PyYAML`, `python-dotenv`, `rapidfuzz`, `pytest` per `plan.md` → Technical Context
-- [ ] T003 [P] Create `config.yaml` at repo root with `run: {layer1: true, vak: true, match: true,
+- [x] T003 [P] Create `config.yaml` at repo root with `run: {layer1: true, vak: true, match: true,
   layer2: false, vk: false}` and `limits: {request_delay_sec: 1.5, max_universities: null}` per
   `contracts/cli-contract.md`
 - [ ] T004 [P] Create `.env.example` at repo root with a `VK_TOKEN=` placeholder (unused this
