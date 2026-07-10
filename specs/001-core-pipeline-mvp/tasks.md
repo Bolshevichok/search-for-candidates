@@ -63,7 +63,7 @@ HTTP client, shared normalization.
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T007 Write SQLite DDL in `app/db/schema.sql` for `universities`, `employees_raw`, `vak_raw`,
+- [x] T007 Write SQLite DDL in `app/db/schema.sql` for `universities`, `employees_raw`, `vak_raw`,
   `candidates`, `possible_namesakes`, `runs`, `run_steps` per `data-model.md` (deliberately no
   `contacts`/`vk_hits` tables — see `data-model.md` intro note). `candidates.candidate_id` is
   `TEXT` (format `c_<zero-padded-number>`), not `INTEGER` — see `data-model.md` for rationale
