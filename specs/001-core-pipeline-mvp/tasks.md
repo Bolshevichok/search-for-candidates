@@ -169,7 +169,7 @@ HTTP client, shared normalization.
 - [x] T026 [US2] In `app/sources/vak/client.py`, for universities with `is_pilot=true` in
   `universities`, fetch and store records from **both** the `is_pilot=false` and `is_pilot=true`
   branches (FR-004)
-- [ ] T027 [US2] Add per-page checkpointing (`checkpoint_cursor` in `run_steps`) for the `vak`
+- [x] T027 [US2] Add per-page checkpointing (`checkpoint_cursor` in `run_steps`) for the `vak`
   step so an interrupted VAK pull resumes from the last completed page (FR-008)
 - [ ] T028 [US2] Implement `app/matching/matcher.py`: normalize (T010) FIO/organization, fuzzy-
   match `defend_org` against `universities.official_name`/`aliases` (`rapidfuzz`), match by exact
