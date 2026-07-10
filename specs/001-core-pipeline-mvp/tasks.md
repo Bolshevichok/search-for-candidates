@@ -108,7 +108,7 @@ HTTP client, shared normalization.
 
 ### Implementation for User Story 1
 
-- [ ] T016 [P] [US1] Implement `app/sources/universities/struct.py`: fetch `/sveden/struct`,
+- [x] T016 [P] [US1] Implement `app/sources/universities/struct.py`: fetch `/sveden/struct`,
   extract subdivision names, fuzzy-match (`rapidfuzz`) against raw department names to resolve a
   canonical `department_id`, cache the result **for the duration of the current run** (in-memory,
   keyed by `university_id` + raw department string) so the same fuzzy comparison is not repeated
