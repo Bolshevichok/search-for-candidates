@@ -233,7 +233,7 @@ layer2/VK колонками), и жёстко застраховаться от
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T040 [P] Run `quickstart.md` end-to-end against a small (~5 university) slice of
+- [x] T040 [P] Run `quickstart.md` end-to-end against a small (~5 university) slice of
   `data/university_registry.csv` and record actual results against expected outcomes
 - [ ] T041 [P] Document `python -m app run/step/export/status/reset` usage in a short
   `README.md`, mirroring `contracts/cli-contract.md`
