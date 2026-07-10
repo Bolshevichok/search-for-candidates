@@ -130,7 +130,7 @@ HTTP client, shared normalization.
   on persistent failure (repeated 5xx/timeout/unexpected structure) record `universities.
   layer1_status` and a `university_errors` entry instead of aborting the whole run (FR-009,
   FR-013, spec.md US1 Acceptance Scenario 2)
-- [ ] T021 [US1] Add per-university checkpointing for the `layer1` step in `run_steps` (T008) so
+- [x] T021 [US1] Add per-university checkpointing for the `layer1` step in `run_steps` (T008) so
   an interrupted `run` resumes at the next unprocessed university instead of restarting (FR-008,
   spec.md US1 Acceptance Scenario 3). In the same checkpoint write, compute a hash of the raw
   `/sveden/employees` content pulled for that university and store it as
