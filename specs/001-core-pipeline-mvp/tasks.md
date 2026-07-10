@@ -103,7 +103,7 @@ HTTP client, shared normalization.
 
 - [x] T014 [P] [US1] Unit tests for FIO/organization normalization in
   `tests/unit/test_normalize.py` (case, `ё→е`, whitespace, hyphen cases)
-- [ ] T015 [P] [US1] Unit tests for `identity_key` construction, cross-run ±1–2 year experience
+- [x] T015 [P] [US1] Unit tests for `identity_key` construction, cross-run ±1–2 year experience
   tolerance, and disciplines-union dedup behavior in `tests/unit/test_identity_key.py`
 
 ### Implementation for User Story 1
