@@ -41,7 +41,7 @@ older copy of this file with different IDs, discard it.
 - [x] T003 [P] Create `config.yaml` at repo root with `run: {layer1: true, vak: true, match: true,
   layer2: false, vk: false}` and `limits: {request_delay_sec: 1.5, max_universities: null}` per
   `contracts/cli-contract.md`
-- [ ] T004 [P] Create `.env.example` at repo root with a `VK_TOKEN=` placeholder (unused this
+- [x] T004 [P] Create `.env.example` at repo root with a `VK_TOKEN=` placeholder (unused this
   feature, reserved per `constitution.md` → Technology Constraints)
 - [ ] T005 [P] Update `.gitignore` for `data/state.sqlite`, `data/backups/`, `data/raw/`,
   `output/`, `logs/`
