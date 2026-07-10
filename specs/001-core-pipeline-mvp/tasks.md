@@ -80,7 +80,7 @@ HTTP client, shared normalization.
   and VAK (US2) per `candidate-pipeline-architecture.md` §4.1
 - [x] T011 [P] Implement `app/sources/http_client.py`: shared retry/backoff wrapper (up to 3
   attempts, 1s→2s→4s backoff on network errors/5xx, no retry on 4xx) per FR-009 / Principle VI
-- [ ] T012 Implement `app/cli.py` skeleton: `argparse` with subcommands `run`, `step
+- [x] T012 Implement `app/cli.py` skeleton: `argparse` with subcommands `run`, `step
   {layer1,vak,match}`, `export`, `status`, `reset`, wired to placeholder step functions and to the
   T009 config loader (including its FR-016 fail-fast check at the top of `run`)
 - [ ] T013 [P] Implement `app/registry/loader.py`: read `data/university_registry.csv` into the
