@@ -179,7 +179,7 @@ HTTP client, shared normalization.
   `possible_namesakes` row and set `needs_review=true` on both cards instead of introducing a 5th
   status, **without removing or blanking out either card's existing fields** (FR-007, §4.2.1,
   spec.md SC-004)
-- [ ] T030 [US2] In `app/matching/matcher.py`, build unified `candidates` rows (`candidate_id` in
+- [x] T030 [US2] In `app/matching/matcher.py`, build unified `candidates` rows (`candidate_id` in
   the `c_<zero-padded-number>` format per `data-model.md`, `full_name`, `identity_key`,
   `match_status`, `needs_review`, university/department/degree/disciplines, `defenses[]`,
   `candidate_content_hash`) and upsert via `app/db/repository.py` (`data-model.md` →
