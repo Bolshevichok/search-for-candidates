@@ -214,7 +214,7 @@ layer2/VK колонками), и жёстко застраховаться от
   `app/export/xlsx.py` per `contracts/xlsx-contract.md`
 - [x] T035 [US3] Wire `app export` in `app/cli.py` to read purely from `data/state.sqlite` (T033,
   T034) with zero network calls (SC-007)
-- [ ] T036 [US3] Implement `app run` orchestration in `app/cli.py`: sequential `layer1 → vak →
+- [x] T036 [US3] Implement `app run` orchestration in `app/cli.py`: sequential `layer1 → vak →
   match → export`, resuming an in-progress `run` via `runs`/`run_steps` (T008) unless `--full` is
   passed, with the FR-016 fail-fast check (T009/T012) actually blocking before any step starts
 - [ ] T037 [US3] Implement `app status` in `app/cli.py`: print university counts by
