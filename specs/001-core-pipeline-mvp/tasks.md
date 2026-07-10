@@ -212,7 +212,7 @@ layer2/VK колонками), и жёстко застраховаться от
   layer2/VK columns always present, always empty in this feature)
 - [x] T034 [US3] Implement the `possible_namesakes`, `university_errors`, and `run_meta` sheets in
   `app/export/xlsx.py` per `contracts/xlsx-contract.md`
-- [ ] T035 [US3] Wire `app export` in `app/cli.py` to read purely from `data/state.sqlite` (T033,
+- [x] T035 [US3] Wire `app export` in `app/cli.py` to read purely from `data/state.sqlite` (T033,
   T034) with zero network calls (SC-007)
 - [ ] T036 [US3] Implement `app run` orchestration in `app/cli.py`: sequential `layer1 → vak →
   match → export`, resuming an in-progress `run` via `runs`/`run_steps` (T008) unless `--full` is
