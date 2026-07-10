@@ -184,7 +184,7 @@ HTTP client, shared normalization.
   `match_status`, `needs_review`, university/department/degree/disciplines, `defenses[]`,
   `candidate_content_hash`) and upsert via `app/db/repository.py` (`data-model.md` →
   `candidates`, FR-017 for the hash)
-- [ ] T031 [US2] Wire `app step vak`, `app step match`, and their stages of `app run` in
+- [x] T031 [US2] Wire `app step vak`, `app step match`, and their stages of `app run` in
   `app/cli.py` to T024–T030
 
 **Checkpoint**: User Stories 1 AND 2 both work independently, per `quickstart.md` Scenarios 1-2.
