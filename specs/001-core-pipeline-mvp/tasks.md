@@ -171,7 +171,7 @@ HTTP client, shared normalization.
   branches (FR-004)
 - [x] T027 [US2] Add per-page checkpointing (`checkpoint_cursor` in `run_steps`) for the `vak`
   step so an interrupted VAK pull resumes from the last completed page (FR-008)
-- [ ] T028 [US2] Implement `app/matching/matcher.py`: normalize (T010) FIO/organization, fuzzy-
+- [x] T028 [US2] Implement `app/matching/matcher.py`: normalize (T010) FIO/organization, fuzzy-
   match `defend_org` against `universities.official_name`/`aliases` (`rapidfuzz`), match by exact
   normalized FIO, and assign exactly one of the 4 `match_status` values per §4.2 rules (FR-006)
 - [ ] T029 [US2] In `app/matching/matcher.py`, detect FIO-matched-but-conflicting-signal pairs
