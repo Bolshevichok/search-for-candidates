@@ -210,7 +210,7 @@ layer2/VK колонками), и жёстко застраховаться от
 - [x] T033 [US3] Implement the `candidates` sheet in `app/export/xlsx.py` per
   `contracts/xlsx-contract.md` (flattening `defenses[]` to the latest-by-date defense per row;
   layer2/VK columns always present, always empty in this feature)
-- [ ] T034 [US3] Implement the `possible_namesakes`, `university_errors`, and `run_meta` sheets in
+- [x] T034 [US3] Implement the `possible_namesakes`, `university_errors`, and `run_meta` sheets in
   `app/export/xlsx.py` per `contracts/xlsx-contract.md`
 - [ ] T035 [US3] Wire `app export` in `app/cli.py` to read purely from `data/state.sqlite` (T033,
   T034) with zero network calls (SC-007)
