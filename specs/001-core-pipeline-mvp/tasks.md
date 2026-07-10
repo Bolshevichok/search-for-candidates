@@ -220,7 +220,7 @@ layer2/VK колонками), и жёстко застраховаться от
 - [x] T037 [US3] Implement `app status` in `app/cli.py`: print university counts by
   `layer1_status`, row counts for `employees_raw`/`vak_raw`/`candidates`,
   `data/state.sqlite` size, and whether the last run finished or was interrupted
-- [ ] T038 [US3] Implement `app reset` in `app/cli.py`: call the shared `backup_state("reset")`
+- [x] T038 [US3] Implement `app reset` in `app/cli.py`: call the shared `backup_state("reset")`
   helper (T008), then clear state (FR-014)
 - [ ] T039 [US3] After a successful `run` in `app/cli.py`, call the same shared
   `backup_state("post_run")` helper (T008) so both backup triggers share one rotation
