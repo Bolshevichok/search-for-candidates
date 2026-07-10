@@ -36,7 +36,7 @@ older copy of this file with different IDs, discard it.
   `app/sources/vak/__init__.py`, `app/sources/universities/__init__.py`,
   `app/matching/__init__.py`, `app/vk/__init__.py`, `app/export/__init__.py`, `app/db/__init__.py`,
   plus empty `data/raw/.gitkeep`, `output/.gitkeep`, `logs/.gitkeep`, `tests/unit/__init__.py`
-- [ ] T002 [P] Create dependency manifest `pyproject.toml` listing `httpx`, `lxml`, `selectolax`,
+- [x] T002 [P] Create dependency manifest `pyproject.toml` listing `httpx`, `lxml`, `selectolax`,
   `openpyxl`, `PyYAML`, `python-dotenv`, `rapidfuzz`, `pytest` per `plan.md` → Technical Context
 - [ ] T003 [P] Create `config.yaml` at repo root with `run: {layer1: true, vak: true, match: true,
   layer2: false, vk: false}` and `limits: {request_delay_sec: 1.5, max_universities: null}` per
