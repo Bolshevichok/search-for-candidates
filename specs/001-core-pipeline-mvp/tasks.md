@@ -217,7 +217,7 @@ layer2/VK колонками), и жёстко застраховаться от
 - [x] T036 [US3] Implement `app run` orchestration in `app/cli.py`: sequential `layer1 → vak →
   match → export`, resuming an in-progress `run` via `runs`/`run_steps` (T008) unless `--full` is
   passed, with the FR-016 fail-fast check (T009/T012) actually blocking before any step starts
-- [ ] T037 [US3] Implement `app status` in `app/cli.py`: print university counts by
+- [x] T037 [US3] Implement `app status` in `app/cli.py`: print university counts by
   `layer1_status`, row counts for `employees_raw`/`vak_raw`/`candidates`,
   `data/state.sqlite` size, and whether the last run finished or was interrupted
 - [ ] T038 [US3] Implement `app reset` in `app/cli.py`: call the shared `backup_state("reset")`
