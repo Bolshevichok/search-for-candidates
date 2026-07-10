@@ -123,7 +123,7 @@ HTTP client, shared normalization.
   index page, collect program page links, fetch each program page, parse `itemprop` microdata
   (`fio`, `post`, `degree`, `academStat`, `teachingDiscipline`, `genExperience`,
   `specExperience`) into raw employee records (FR-001, `research.md` §4)
-- [ ] T019 [US1] In `app/sources/universities/layer1.py`, dedup raw records per university by
+- [x] T019 [US1] In `app/sources/universities/layer1.py`, dedup raw records per university by
   `identity_key` (T017), union `disciplines` across duplicate program listings without loss or
   duplication, and upsert into `employees_raw` via `app/db/repository.py` (FR-003)
 - [ ] T020 [US1] In `app/sources/universities/layer1.py`, wire per-request retry/backoff (T011);
