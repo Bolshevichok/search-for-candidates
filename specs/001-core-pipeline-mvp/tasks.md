@@ -78,7 +78,7 @@ HTTP client, shared normalization.
 - [x] T010 [P] Implement `app/matching/normalize.py`: FIO normalization (case, `ё→е`, whitespace,
   hyphen spacing in double surnames) and organization-name normalization — shared by layer1 (US1)
   and VAK (US2) per `candidate-pipeline-architecture.md` §4.1
-- [ ] T011 [P] Implement `app/sources/http_client.py`: shared retry/backoff wrapper (up to 3
+- [x] T011 [P] Implement `app/sources/http_client.py`: shared retry/backoff wrapper (up to 3
   attempts, 1s→2s→4s backoff on network errors/5xx, no retry on 4xx) per FR-009 / Principle VI
 - [ ] T012 Implement `app/cli.py` skeleton: `argparse` with subcommands `run`, `step
   {layer1,vak,match}`, `export`, `status`, `reset`, wired to placeholder step functions and to the
