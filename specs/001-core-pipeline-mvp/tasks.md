@@ -159,7 +159,7 @@ HTTP client, shared normalization.
   both cards keep every layer1/VAK field they had before (full_name, university/department for
   the site card; `defenses[]` for the VAK card) — i.e. explicitly cover spec.md SC-004, not just
   the status/flag values
-- [ ] T024 [P] [US2] Implement `app/sources/vak/client.py`: paginated `GET
+- [x] T024 [P] [US2] Implement `app/sources/vak/client.py`: paginated `GET
   /api/att/adverts/?page=N&pageSize=100&is_pilot={true,false}` against `https://vak.gisnauka.ru`
   via the shared client (T011), 8–10s timeout (`research.md` §5)
 - [ ] T025 [US2] Implement `app/sources/vak/parser.py`: map API JSON fields (`fio`,
