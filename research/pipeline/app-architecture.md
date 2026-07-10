@@ -194,7 +194,7 @@ limits:
 |---|---|
 | full_name, match_status | матчер — закрытый список из 4 значений: `site_and_vak` / `site_and_vak_probable` / `vak_no_site` / `site_no_vak` |
 | university, department, degree, disciplines | слой 1 (пусто у `vak_no_site`) |
-| defense_date, dissertation_type, specialty, topic, defend_org, is_pilot | ВАК |
+| defense_date, dissertation_type, specialty, branch, topic, defend_org, is_pilot | ВАК (`specialty` — «код - название» одной строкой, как в API; `branch` — более крупная отрасль науки текстом; оба поля отдаются API как есть, см. `vak-analysis.md`) |
 | email, phone, contact_type, contact_url | слой 2 |
 | vk_url, vk_score, vk_status | VK (обязательный шаг; канонические значения `vk_status` — `candidates_found` / `not_found` / `skipped_no_group` / `error`, см. `vk-matching-spec.md`, §7) |
 | needs_review | `true`, если строка участвует в записи на листе `possible_namesakes` (вероятный тёзка) — **не** при обычном отсутствии записи в одном из источников, это не повод для пометки. Не влияет на то, попала ли карточка в слой 2/VK — туда карточки попадают по `match_status`, независимо от `needs_review` |
