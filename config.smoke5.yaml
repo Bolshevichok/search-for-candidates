@@ -1,0 +1,11 @@
+run:
+  layer1: true
+  vak: true
+  match: true
+  layer2: false
+  vk: false
+
+limits:
+  request_delay_sec: 1.0
+  max_universities: 5
+  vak_max_pages: 15

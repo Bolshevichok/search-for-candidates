@@ -45,7 +45,12 @@ def cmd_run(args: argparse.Namespace) -> int:
         max_universities=cfg.limits.max_universities,
       )
     if cfg.run.vak:
-      run_vak(repo, run_id, request_delay_sec=0.0)
+      run_vak(
+        repo,
+        run_id,
+        request_delay_sec=0.0,
+        max_pages=cfg.limits.vak_max_pages,
+      )
     if cfg.run.match:
       run_match(repo, run_id)
     out = Path(args.out) if args.out else default_output_path()
@@ -69,7 +74,7 @@ def cmd_step(args: argparse.Namespace) -> int:
         max_universities=cfg.limits.max_universities,
       )
     elif args.step_name == "vak":
-      run_vak(repo, run_id)
+      run_vak(repo, run_id, max_pages=cfg.limits.vak_max_pages)
     elif args.step_name == "match":
       run_match(repo, run_id)
     print(f"Step {args.step_name} completed for run {run_id}.")

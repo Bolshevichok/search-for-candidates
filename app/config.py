@@ -31,6 +31,7 @@ class RunFlags:
 class Limits:
   request_delay_sec: float = 1.5
   max_universities: int | None = None
+  vak_max_pages: int | None = None
 
 
 @dataclass
@@ -56,6 +57,7 @@ def load_config(config_path: Path | str = "config.yaml") -> AppConfig:
   run_raw = raw.get("run") or {}
   limits_raw = raw.get("limits") or {}
   max_uni = limits_raw.get("max_universities")
+  vak_max_pages = limits_raw.get("vak_max_pages")
   cfg = AppConfig(
     run=RunFlags(
       layer1=bool(run_raw.get("layer1", True)),
@@ -67,6 +69,7 @@ def load_config(config_path: Path | str = "config.yaml") -> AppConfig:
     limits=Limits(
       request_delay_sec=float(limits_raw.get("request_delay_sec", 1.5)),
       max_universities=int(max_uni) if max_uni is not None else None,
+      vak_max_pages=int(vak_max_pages) if vak_max_pages is not None else None,
     ),
     config_path=path,
   )
