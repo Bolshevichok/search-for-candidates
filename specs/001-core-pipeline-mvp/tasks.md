@@ -174,7 +174,7 @@ HTTP client, shared normalization.
 - [x] T028 [US2] Implement `app/matching/matcher.py`: normalize (T010) FIO/organization, fuzzy-
   match `defend_org` against `universities.official_name`/`aliases` (`rapidfuzz`), match by exact
   normalized FIO, and assign exactly one of the 4 `match_status` values per §4.2 rules (FR-006)
-- [ ] T029 [US2] In `app/matching/matcher.py`, detect FIO-matched-but-conflicting-signal pairs
+- [x] T029 [US2] In `app/matching/matcher.py`, detect FIO-matched-but-conflicting-signal pairs
   (lower site degree than the VAK record implies, or unrelated specialty/discipline); write a
   `possible_namesakes` row and set `needs_review=true` on both cards instead of introducing a 5th
   status, **without removing or blanking out either card's existing fields** (FR-007, §4.2.1,
