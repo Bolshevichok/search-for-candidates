@@ -166,7 +166,7 @@ HTTP client, shared normalization.
   `dissertation_type`, `specialty`, `branch`, `dissertation_name`→`topic`, `defend_org`,
   `date_defend`, `id`/`old_id`) into `vak_raw` rows, tagging `is_pilot_branch` from the query used
   (`data-model.md` → `vak_raw`)
-- [ ] T026 [US2] In `app/sources/vak/client.py`, for universities with `is_pilot=true` in
+- [x] T026 [US2] In `app/sources/vak/client.py`, for universities with `is_pilot=true` in
   `universities`, fetch and store records from **both** the `is_pilot=false` and `is_pilot=true`
   branches (FR-004)
 - [ ] T027 [US2] Add per-page checkpointing (`checkpoint_cursor` in `run_steps`) for the `vak`
