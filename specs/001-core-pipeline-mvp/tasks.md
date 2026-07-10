@@ -119,7 +119,7 @@ HTTP client, shared normalization.
 - [x] T017 [P] [US1] Implement `app/matching/identity_key.py`: build `identity_key =
   fio_normalized + university_id + department_id + genExperience/specExperience` per FR-003 /
   `candidate-pipeline-architecture.md` §4.1.1
-- [ ] T018 [US1] Implement `app/sources/universities/layer1.py`: fetch the `/sveden/employees`
+- [x] T018 [US1] Implement `app/sources/universities/layer1.py`: fetch the `/sveden/employees`
   index page, collect program page links, fetch each program page, parse `itemprop` microdata
   (`fio`, `post`, `degree`, `academStat`, `teachingDiscipline`, `genExperience`,
   `specExperience`) into raw employee records (FR-001, `research.md` §4)
