@@ -116,7 +116,7 @@ HTTP client, shared normalization.
   explicitly out of scope for this feature (see spec.md FR-002 clarification); the next run
   re-resolves from `/sveden/struct` again, which is safe because results are deterministic inputs
   to `identity_key`, not a source of drift
-- [ ] T017 [P] [US1] Implement `app/matching/identity_key.py`: build `identity_key =
+- [x] T017 [P] [US1] Implement `app/matching/identity_key.py`: build `identity_key =
   fio_normalized + university_id + department_id + genExperience/specExperience` per FR-003 /
   `candidate-pipeline-architecture.md` §4.1.1
 - [ ] T018 [US1] Implement `app/sources/universities/layer1.py`: fetch the `/sveden/employees`
