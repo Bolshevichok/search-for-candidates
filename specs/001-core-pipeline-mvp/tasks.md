@@ -126,7 +126,7 @@ HTTP client, shared normalization.
 - [x] T019 [US1] In `app/sources/universities/layer1.py`, dedup raw records per university by
   `identity_key` (T017), union `disciplines` across duplicate program listings without loss or
   duplication, and upsert into `employees_raw` via `app/db/repository.py` (FR-003)
-- [ ] T020 [US1] In `app/sources/universities/layer1.py`, wire per-request retry/backoff (T011);
+- [x] T020 [US1] In `app/sources/universities/layer1.py`, wire per-request retry/backoff (T011);
   on persistent failure (repeated 5xx/timeout/unexpected structure) record `universities.
   layer1_status` and a `university_errors` entry instead of aborting the whole run (FR-009,
   FR-013, spec.md US1 Acceptance Scenario 2)
