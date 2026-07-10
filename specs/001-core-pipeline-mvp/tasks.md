@@ -83,7 +83,7 @@ HTTP client, shared normalization.
 - [x] T012 Implement `app/cli.py` skeleton: `argparse` with subcommands `run`, `step
   {layer1,vak,match}`, `export`, `status`, `reset`, wired to placeholder step functions and to the
   T009 config loader (including its FR-016 fail-fast check at the top of `run`)
-- [ ] T013 [P] Implement `app/registry/loader.py`: read `data/university_registry.csv` into the
+- [x] T013 [P] Implement `app/registry/loader.py`: read `data/university_registry.csv` into the
   `universities` table (`official_name`, `aliases`, `domain`, `region`, `accreditation_status`,
   `vk_group_id`, `is_pilot`)
 
