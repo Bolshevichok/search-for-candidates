@@ -152,7 +152,7 @@ HTTP client, shared normalization.
 
 ### Tests for User Story 2
 
-- [ ] T023 [P] [US2] Unit tests for matcher status assignment in `tests/unit/test_matcher.py`:
+- [x] T023 [P] [US2] Unit tests for matcher status assignment in `tests/unit/test_matcher.py`:
   all 4 statuses, the `is_pilot` both-branches case, and the conflicting-signal case (FR-006,
   FR-007, spec.md US2 Acceptance Scenarios 1-4). For the conflicting-signal case, assert **both**
   that a `possible_namesakes` row is created with `needs_review=true` on both cards **and** that
