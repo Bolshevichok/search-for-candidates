@@ -18,6 +18,20 @@ Sync Impact Report
     at the repo root; create them referencing this constitution if/when they are added
 - Deferred: no testing-strategy principle included — not decided yet for this project;
   add as a MINOR amendment if/when a testing approach is agreed
+
+Sync Impact Report (Amendment)
+- Version change: 1.0.0 → 1.0.1 (PATCH — clarification, no principle removed/redefined)
+- Modified principles: V. Mandatory Enrichment, No Feedback Loop — added an explicit scoping
+  clause: the "run automatically on every full run" language applies once layer2/VK are
+  implemented and describes a full (M3) run; earlier milestones (M0–M2) shipping without
+  layer2/VK are explicitly not a violation. Raised during `/speckit-analyze` on
+  `specs/001-core-pipeline-mvp/` (finding C1): `plan.md`'s Constitution Check was reinterpreting
+  this principle inline to justify feature 001 instead of the constitution stating the scope
+  explicitly — this amendment removes the need for that inline reinterpretation.
+- Added/removed sections: none
+- Templates requiring updates: ✅ `specs/001-core-pipeline-mvp/plan.md` Constitution Check row
+  for Principle V updated to cite the amended text directly (no other templates reference this
+  principle by name)
 -->
 
 # search-for-candidates Constitution
@@ -61,11 +75,16 @@ quality judgment — because "missing from one source" is the common case, not a
 
 ### V. Mandatory Enrichment, No Feedback Loop
 
-Layer2 (contacts) and VK search run automatically on every full run for every eligible
-candidate — no per-record operator approval gate exists or should be added. The xlsx is
-the only deliverable: the program MUST NOT wait for, or persist, any reviewer decision back
-into `state.sqlite`, and MUST NOT version a candidate's history across runs
-(`app-architecture.md`, §10; `candidate-pipeline-architecture.md`, §7).
+Layer2 (contacts) and VK search run automatically on every **full (M3) run** for every eligible
+candidate, once those steps are implemented — no per-record operator approval gate exists or
+should be added for them. Earlier milestones (`app-architecture.md`, §8: M0–M2) MAY ship without
+layer2/VK altogether — a feature that delivers only layer1+VAK+matcher is a legitimate
+incremental milestone, not a violation of this principle, as long as it does not add a per-record
+approval gate for whichever steps it *does* implement, and fails fast rather than silently
+no-op'ing if a caller tries to enable a step that isn't built yet. The xlsx is the only
+deliverable: the program MUST NOT wait for, or persist, any reviewer decision back into
+`state.sqlite`, and MUST NOT version a candidate's history across runs (`app-architecture.md`,
+§10; `candidate-pipeline-architecture.md`, §7).
 
 ### VI. One Retry Policy, Not One Per Source
 
@@ -110,4 +129,4 @@ file. This project currently has one maintainer, so review is self-review — bu
 task that violates a principle here MUST NOT proceed without either documenting the
 violation in the plan's Complexity Tracking table or amending this constitution first.
 
-**Version**: 1.0.0 | **Ratified**: 2026-07-10 | **Last Amended**: 2026-07-10
+**Version**: 1.0.1 | **Ratified**: 2026-07-10 | **Last Amended**: 2026-07-10
