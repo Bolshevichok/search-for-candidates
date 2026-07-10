@@ -1,0 +1,43 @@
+# Secrets
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+.venv/
+venv/
+.envrc
+
+# App runtime (see research/pipeline/app-architecture.md)
+data/state.sqlite
+data/state.sqlite-*
+data/backups/
+
+# Pipeline outputs
+output/
+logs/
+
+# Script artifacts: raw downloads, caches, exploration scratch (rebuild via university_registry/download_accred_data.py)
+# Everything scraped/downloaded while researching sources (HTML/JS/zip/etc.) lives here, not in git.
+data/raw/
+
+# Regeneratable registry sidecars (main CSV: data/university_registry.csv — keep in git)
+data/university_registry.json
+data/university_registry.meta.json
+data/university_registry_vk_review.csv
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Playwright (if used locally)
+playwright-report/
+test-results/
+.playwright/
