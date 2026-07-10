@@ -201,7 +201,7 @@ layer2/VK колонками), и жёстко застраховаться от
 
 ### Tests for User Story 3
 
-- [ ] T032 [P] [US3] Unit test asserting the xlsx `candidates` sheet always includes
+- [x] T032 [P] [US3] Unit test asserting the xlsx `candidates` sheet always includes
   `email`/`phone`/`vk_url`/`vk_score`/`vk_status` columns, present but empty, in
   `tests/unit/test_xlsx_contract.py` per `contracts/xlsx-contract.md` (FR-012, SC-005)
 
