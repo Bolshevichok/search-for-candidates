@@ -18,13 +18,6 @@ dependencies = [
     "rapidfuzz>=3.0",
 ]
 
-[project.optional-dependencies]
-dev = ["pytest>=8.0"]
-
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["."]

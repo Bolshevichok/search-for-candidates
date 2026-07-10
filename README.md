@@ -7,7 +7,7 @@ Batch CLI pipeline: university Layer 1 employees, VAK defenses, matcher, xlsx ex
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
-pip install -e ".[dev]"
+pip install -e .
 copy .env.example .env
 ```
 

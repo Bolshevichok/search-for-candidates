@@ -336,6 +336,12 @@ developers.
 
 ## Notes
 
+- **Post-implementation removal of the test suite.** T014/T015/T023/T032 (pytest unit tests) and
+  `tests/unit/` were removed after implementation, per an explicit user decision that this project
+  does not carry an automated test suite — the tasks above remain checked as a historical record
+  of what was built during `/speckit-implement`, but the files no longer exist and `pytest` is no
+  longer a dependency in `pyproject.toml`. `research.md` §1's testing-strategy rationale is
+  superseded by this decision.
 - [P] tasks = different files, no dependencies on incomplete tasks
 - [Story] label maps task to specific user story for traceability
 - Commit after each task or logical group
