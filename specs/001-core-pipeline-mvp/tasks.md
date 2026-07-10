@@ -75,7 +75,7 @@ HTTP client, shared normalization.
   `reset` and post-`run` backup call sites (T038/T039) instead of duplicating the logic
 - [x] T009 [P] Implement `app/config.py`: load `config.yaml` + `.env`; if `run.layer2` or `run.vk`
   is `true`, raise a clear "step not implemented" error immediately (FR-016)
-- [ ] T010 [P] Implement `app/matching/normalize.py`: FIO normalization (case, `ё→е`, whitespace,
+- [x] T010 [P] Implement `app/matching/normalize.py`: FIO normalization (case, `ё→е`, whitespace,
   hyphen spacing in double surnames) and organization-name normalization — shared by layer1 (US1)
   and VAK (US2) per `candidate-pipeline-architecture.md` §4.1
 - [ ] T011 [P] Implement `app/sources/http_client.py`: shared retry/backoff wrapper (up to 3
