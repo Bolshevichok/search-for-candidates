@@ -35,6 +35,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 try:
     from crawl4ai import AsyncWebCrawler
@@ -237,9 +238,10 @@ async def crawl_and_parse_contact(
             crawl_status="page_not_found",
         )
 
-    # Step 2: Prepare search URL
+    # Step 2: Prepare search URL (URL-encode the search parameter)
     search_query = search_term or full_name.split()[-1]
-    search_url = f"{employees_url}?search={search_query}"
+    params = {"search": search_query}
+    search_url = f"{employees_url}?{urlencode(params)}"
 
     # Step 3: Crawl using Crawl4AI if available
     crawler = Crawl4AICrawler()
