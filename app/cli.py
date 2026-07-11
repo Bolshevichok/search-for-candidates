@@ -13,6 +13,7 @@ from app.matching.matcher import run_match
 from app.pipeline.ingest import run_ingest
 from app.registry.loader import load_registry
 from app.sources.universities.layer1 import run_layer1
+from app.sources.universities.layer2 import run_layer2
 from app.sources.vak.pipeline import run_vak
 
 
@@ -68,6 +69,13 @@ def cmd_step(args: argparse.Namespace) -> int:
         request_delay_sec=cfg.limits.vak_request_delay_sec,
         max_pages=cfg.limits.vak_max_pages,
         detail_workers=cfg.limits.vak_detail_workers,
+      )
+    elif args.step_name == "layer2":
+      run_layer2(
+        args.db,
+        run_id,
+        request_delay_sec=cfg.limits.layer2_request_delay_sec,
+        workers=cfg.limits.layer2_workers,
       )
     elif args.step_name == "match":
       run_match(repo, run_id)
@@ -131,7 +139,7 @@ def build_parser() -> argparse.ArgumentParser:
   p_run.set_defaults(func=cmd_run)
 
   p_step = sub.add_parser("step", help="Run a single step")
-  p_step.add_argument("step_name", choices=["layer1", "vak", "match"])
+  p_step.add_argument("step_name", choices=["layer1", "vak", "layer2", "match"])
   p_step.set_defaults(func=cmd_step)
 
   p_export = sub.add_parser("export", help="Export xlsx from database")
