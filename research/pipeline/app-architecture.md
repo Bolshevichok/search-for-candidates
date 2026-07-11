@@ -2,7 +2,8 @@
 
 Как собрать пайплайн из [candidate-pipeline-architecture.md](candidate-pipeline-architecture.md) в **запускаемую программу без UX/UI**: раз в месяц прогнали → через часы получили таблицу.
 
-**Статус:** черновик под разработку  
+**Статус:** **M1 реализован** (`001-core-pipeline-mvp`): layer1 + VAK (list+detail) + match + xlsx; layer2/VK — в коде заглушка (FR-016).  
+**Эмпирика smoke5 (2026-07):** 5 вузов реестра (3 ok / 2 `unresolved_domain`), 305 сотрудников, 2865 VAK, ~4.2 мин wall-clock при `layer1_workers=4`, `vak_detail_workers=8`.
 **Продуктовые ограничения от заказчика:** UI не нужен; время прогона часы — ок; результат — файл (xlsx / аналог); **layer2 и VK — обязательные шаги** полного прогона (без согласия оператора на каждую карточку).
 
 ---
@@ -37,8 +38,8 @@ flowchart LR
     end
 
     subgraph engine [Движок батча]
-        s1["1. Layer1\n/sveden/employees\nпараллельно, ~10 доменов сразу"]
-        s2["2. VAK API\nвыгрузка (инкрементально после 1-го прогона)"]
+        s1["1. Layer1\n/sveden/employees\nпараллельно: 1 вуз = 1 поток"]
+        s2["2. VAK API\nlist + detail (8 воркеров)\nпараллельно с layer1 до match"]
         s3["3. Match\n4 статуса: site_and_vak(_probable) / vak_no_site / site_no_vak"]
         s4["4. Layer2 контакты\nОБЯЗАТЕЛЬНО\n(есть вуз, если карточка изменилась)"]
         s5["5. VK group search\nОБЯЗАТЕЛЬНО, батчами через execute()"]
@@ -75,7 +76,7 @@ flowchart LR
 | Конфиг | `config.yaml` + `.env` | Список режимов, таймауты, пути; секреты (VK token) отдельно |
 | Выгрузка | `openpyxl` → `.xlsx` | То, что заказчик открывает в Excel |
 | Оркестрация | один пакет `app` + CLI (`typer` / `argparse`) | Без Airflow/K8s на MVP |
-| Параллелизм | пул потоков (`concurrent.futures.ThreadPoolExecutor`), ~10 воркеров | слой 1 и слой 2 бьются по доменам вузов — один вуз = один независимый обход, поэтому просто параллелим по доменам, без очередей задач/брокеров |
+| Параллелизм | `ThreadPoolExecutor` в `app/pipeline/ingest.py`: **layer1 ∥ VAK** до match; внутри layer1 — `layer1_workers` (1 вуз = 1 поток); внутри VAK — list последовательно, **detail параллельно** (`vak_detail_workers`, по умолчанию 8) | SQLite WAL + `busy_timeout`; connection per thread; upsert VAK detail — из главного потока после fetch |
 
 Сервер, Docker, очередь задач — **не нужны**, пока крутится на одной машине оператора. Docker можно добавить позже как «упаковали зависимости», не как архитектуру.
 
@@ -85,7 +86,7 @@ flowchart LR
 
 | Источник | Что лечим ретраем | Политика |
 |---|---|---|
-| ВАК API | сеть/таймаут, 5xx; сервер сам по себе медленный (3–5 сек/запрос — это норма, не сбой) | таймаут 8–10 сек, до 3 повторов с экспоненциальным backoff (1с → 2с → 4с) только на сетевые ошибки/5xx, не на 4xx |
+| ВАК API | list `/api/att/adverts/` + **detail** `/api/att/adverts/{id}/` на каждую запись; сеть/таймаут, 5xx | list — пагинация; detail — основной объём запросов. Таймаут 8–10 сек, до 3 повторов с backoff на сеть/5xx |
 | Layer1 / Layer2 (сайты вузов) | сеть/таймаут, 5xx, временный 403 | до 3 повторов с backoff; постоянный 403 — не ретраим бесконечно, переключаемся на headless/прокси (механизм общий для слоя 1 и слоя 2, описан в `candidate-pipeline-architecture.md`, §6.3 — там просто исторически находится, привязки только к слою 2 нет), а после — в `university_errors` |
 | VK API | код 6/9 (rate limit / flood control) | backoff 1с → 2с → 4с → 8с; код 5 (токен) — refresh, не ретрай |
 
@@ -99,13 +100,15 @@ flowchart LR
 app/
   cli.py                 # run / step / export / status / reset
   config.py
+  pipeline/
+    ingest.py            # layer1 и VAK параллельно до match
   registry/              # загрузка university_registry
   sources/
-    vak/                 # клиент API ВАК, пагинация, is_pilot
+    vak/                 # list + parallel detail fetch, pagination, is_pilot
     universities/
       layer1.py          # /sveden/employees → сырые сотрудники
       layer2.py          # discovery + контакты — обязательный шаг для карточек с вузом
-  matching/              # нормализация ФИО, identity_key, 4 статуса site_and_vak/site_and_vak_probable/vak_no_site/site_no_vak, possible_namesakes
+  matching/              # normalize, identity_key, employee_merge (dedup), matcher, possible_namesakes
   vk/                    # MVP: users.search + group_id — обязательный шаг прогона
   export/
     xlsx.py              # листы Excel
@@ -131,9 +134,9 @@ logs/
 | Таблица | Содержание |
 |---|---|
 | `universities` | из registry: `official_name`, `aliases`, `domain`, `region`, `accreditation_status`, `vk_group_id`, `is_pilot`, `layer1_status` — те же поля, что в `university_registry` (см. `candidate-pipeline-architecture.md`, §3), таблица SQLite их не сокращает |
-| `employees_raw` | сырой слой 1 (fio, post, degree, department, department_id, genExperience/specExperience, source_url, university_id) |
-| `vak_raw` | сырые объявления ВАК (в т.ч. флаг `is_pilot`, из какой ветки пришла запись) |
-| `candidates` | результат матча: единая карточка + `match_status` (закрытый список из 4: `site_and_vak`/`site_and_vak_probable`/`vak_no_site`/`site_no_vak`) + `needs_review` + `identity_key` + `candidate_content_hash` |
+| `employees_raw` | сырой слой 1: fio, post, degree, academic_title, disciplines, gen/spec_experience, teaching_level/qualification/op, source_url, department_id, identity_key |
+| `vak_raw` | сырые объявления ВАК: list stub + **detail-карточка** (specialty, branch, defend_org, council_cipher, org_address, org_phone, is_pilot_branch) |
+| `candidates` | результат матча + site-поля (post, academic_title, gen/spec_experience, source_url) + `defenses[]` JSON; `match_status` (4 значения) |
 | `possible_namesakes` | связи «вероятный тёзка»: `site_candidate_id`, `vak_candidate_id`, `reason` — не статус карточки, а отдельная таблица (см. `candidate-pipeline-architecture.md`, §4.2.1) |
 | `contacts` | email/phone из слоя 2 (если включён) |
 | `vk_hits` | найденные профили (url, score, signals) |
@@ -181,28 +184,50 @@ run:
 # VK_TOKEN обязателен в .env, иначе run падает на шаге vk
 limits:
   request_delay_sec: 1.5
-  max_universities: null   # или 10 для пробного прогона
-```---
+  layer1_workers: 4
+  vak_request_delay_sec: 0.0
+  vak_detail_workers: 8
+  max_universities: null   # или 5 для config.smoke5.yaml
+```
+
+**Smoke-конфиг** (`config.smoke5.yaml`): 5 первых вузов реестра, 15 страниц VAK на ветку, `layer1_workers: 4`, `vak_detail_workers: 8`. Эмпирика smoke5 (2865 VAK detail): **~4 мин** wall-clock при параллельном ingest (ранее ~15–20 мин последовательно).
+
+---
 
 ## 7. Что в xlsx (контракт для заказчика)
 
 Один файл, несколько листов:
 
-**Лист `candidates` (главный)** — одна строка = один человек:
+**Лист `site_employees`** — сотрудники с сайтов вузов (`site_no_vak`, `site_and_vak`, `site_and_vak_probable`):
 
-| Колонки (черновик) | Откуда |
+| Колонки | Откуда |
 |---|---|
-| full_name, match_status | матчер — закрытый список из 4 значений: `site_and_vak` / `site_and_vak_probable` / `vak_no_site` / `site_no_vak` |
-| university, department, degree, disciplines | слой 1 (пусто у `vak_no_site`) |
-| defense_date, dissertation_type, specialty, branch, topic, defend_org, is_pilot | ВАК (`specialty` — «код - название» одной строкой, как в API; `branch` — более крупная отрасль науки текстом; оба поля отдаются API как есть, см. `vak-analysis.md`) |
-| email, phone, contact_type, contact_url | слой 2 |
-| vk_url, vk_score, vk_status | VK (обязательный шаг; канонические значения `vk_status` — `candidates_found` / `not_found` / `skipped_no_group` / `error`, см. `vk-matching-spec.md`, §7) |
-| needs_review | `true`, если строка участвует в записи на листе `possible_namesakes` (вероятный тёзка) — **не** при обычном отсутствии записи в одном из источников, это не повод для пометки. Не влияет на то, попала ли карточка в слой 2/VK — туда карточки попадают по `match_status`, независимо от `needs_review` |
-| source_notes | коротко: `site_and_vak` / `site_and_vak_probable` / `vak_no_site` / `site_no_vak` |
+| full_name, match_status, needs_review | матчер |
+| university, department, post, degree, academic_title | слой 1 |
+| disciplines, gen_experience, spec_experience | слой 1 (`itemprop`) |
+| email, phone, contact_url, vk_* | слой 2 / VK (пусто в MVP) |
+| source_url | страница программы, откуда распарсили |
+
+**Лист `vak_candidates`** — записи ВАК (`vak_no_site`, `site_and_vak`, `site_and_vak_probable`):
+
+| Колонки | Откуда |
+|---|---|
+| branch, specialty_code, specialty_name, dissertation_type, topic | detail-карточка ВАK |
+| defense_date, defend_org, council_cipher, org_address, org_phone, is_pilot | detail-карточка ВАK |
+
+Слияния (`site_and_vak` / `site_and_vak_probable`) попадают **на оба листа**: site-колонки и VAK-колонки соответственно.
+
+**Лист `candidates` (устарел)** — заменён двумя листами выше (MVP build `001-core-pipeline-mvp`).
 
 **Лист `possible_namesakes`** (было `conflicts`) — пары «ВАК ↔ сайт» с одинаковым ФИО, но противоречащими сигналами, которые матчер не смержил автоматически. Это не 5-е значение `match_status` (обе карточки пары сохраняют свой обычный статус — `site_no_vak` и `vak_no_site` — и по-прежнему проходят слой 2/VK как любая другая карточка того же статуса), а отдельная связь-таблица только для этого листа и для `needs_review`. Подробности — `candidate-pipeline-architecture.md`, §4.2.1. Переименован специально: это не «конфликты данных», а гипотеза «вероятно, два разных человека».
 
-**Лист `university_errors`** — вузы, где `/sveden/employees` не открылся / пустая вёрстка / таймаут (чтобы чинить registry, а не искать «куда делись люди»).
+**Лист `university_errors`** — вузы, которые layer1 **не обработал**:
+
+| `error_type` | Причина | Действие |
+|---|---|---|
+| `unresolved_domain` | пустой `domain` в `university_registry.csv` — **HTTP не вызывался** | дописать домен, проверить `<domain>/sveden/employees` → 200 |
+| `unreachable` | HTTP ≠ 200, таймаут | DNS, блокировка, неверный домен |
+| `unexpected_structure` | нет `teachingStaff` на program-страницах | вёрстка вуза |
 
 **Лист `run_meta`** — дата прогона, длительность, счётчики, git/version если есть.
 
@@ -217,7 +242,7 @@ limits:
 | Этап | Что работает | Артефакт |
 |---|---|---|
 | **M0** | registry (ручной CSV на 5–20 вузов) + layer1 + export | xlsx только сотрудники вузов |
-| **M1** | + выгрузка ВАК + матчер (4 статуса: `site_and_vak` / `site_and_vak_probable` / `vak_no_site` / `site_no_vak`) | xlsx с двумя контурами людей |
+| **M1** | ✅ **реализовано**: registry + layer1 + VAK (list+detail) + match + xlsx (`site_employees` + `vak_candidates`) | два контура людей в Excel |
 | **M2** | + **layer2** (контакты с сайтов) для карточек с вузом | колонки email/phone |
 | **M3** | + **VK пакетно** по `group_id` | колонки vk_url / vk_score / vk_status |
 
@@ -227,8 +252,8 @@ limits:
 
 | Шаг | Ограничение | Расчёт |
 |---|---|---|
-| ВАК, полная выгрузка (первый прогон) | сервер отвечает 3–5 сек/запрос, без объявленного rate limit | 164 045 записей / pageSize=100 ≈ 1640 страниц; при 5–10 параллельных запросах — десятки минут, не часы. Инкрементально (после 1-го прогона) — минуты, если API поддерживает выборку по дате/сортировке (см. §5 в `candidate-pipeline-architecture.md`, нужно проверить технически) |
-| Layer1, обход сайтов вузов | вежливая задержка 1–2 сек **к одному домену**, но домены независимы | при ~10 параллельных доменах и сотнях вузов — часы на первый полный обход, минуты на инкрементальный (только изменившиеся) |
+| ВАК, полная выгрузка (первый прогон) | list `/api/att/adverts/` + detail `/api/att/adverts/{id}/` на каждую запись | ~164k detail-запросов; при **8 параллельных detail** smoke (2865 записей) ≈ **4 мин** VAK-часть; полный прогон — ориентир **десятки минут**, не часы (при отсутствии rate limit со стороны API) |
+| Layer1, обход сайтов вузов | задержка 1–2 сек **к одному домену**; `layer1_workers` параллельно по разным доменам | ingest wall-clock ≈ **max(layer1, vak)**, не сумма; layer1 для сотен вузов — часы на первый полный обход |
 | Layer2, контакты | десятки страниц на кандидата, зависит от того, протоптан ли маршрут по вузу (§6.4 в `candidate-pipeline-architecture.md`) | самый непредсказуемый шаг по времени — вне контроля этой спеки (разрабатывает другой человек) |
 | VK, батч-поиск | **уточнено:** 3 запроса/сек на пользовательский токен (подтверждено на dev.vk.com), но метод `execute` бандлит до 25 вызовов `users.search` в один запрос → реальная пропускная способность ≈ 3×25 = **75 запросов/сек** на токен, а не 3/сек буквально | 100 000 кандидатов / 75 в сек ≈ **22 минуты** теоретически. Есть неподтверждённый документами скрытый антиспам-лимит (~25–40 вызовов за окно, см. `vk-matching-spec.md`, §8.1) — **нужно проверить эмпирически на реальном токене**, тратит он лимит по «сырым» вызовам внутри `execute` или по самим `execute`-запросам; от этого зависит, держится ли расчёт на практике |
 
