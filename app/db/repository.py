@@ -39,7 +39,18 @@ class Repository:
   def init_schema(self) -> None:
     ddl = SCHEMA_PATH.read_text(encoding="utf-8")
     self.conn.executescript(ddl)
+    self._migrate_vak_raw()
     self.conn.commit()
+
+  def _migrate_vak_raw(self) -> None:
+    existing = {row["name"] for row in self.execute("PRAGMA table_info(vak_raw)")}
+    for col, col_type in (
+      ("council_cipher", "TEXT"),
+      ("org_address", "TEXT"),
+      ("org_phone", "TEXT"),
+    ):
+      if col not in existing:
+        self.execute(f"ALTER TABLE vak_raw ADD COLUMN {col} {col_type}")
 
   def execute(self, sql: str, params: tuple[Any, ...] | list[Any] = ()) -> sqlite3.Cursor:
     return self.conn.execute(sql, params)
@@ -273,8 +284,9 @@ class Repository:
       """
       INSERT INTO vak_raw (
         vak_id, old_id, fio, fio_normalized, dissertation_type, specialty, branch,
-        topic, defend_org, date_defend, is_pilot_branch
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        topic, defend_org, council_cipher, org_address, org_phone, date_defend,
+        is_pilot_branch
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(vak_id) DO UPDATE SET
         old_id = excluded.old_id,
         fio = excluded.fio,
@@ -284,6 +296,9 @@ class Repository:
         branch = excluded.branch,
         topic = excluded.topic,
         defend_org = excluded.defend_org,
+        council_cipher = excluded.council_cipher,
+        org_address = excluded.org_address,
+        org_phone = excluded.org_phone,
         date_defend = excluded.date_defend,
         is_pilot_branch = excluded.is_pilot_branch
       """,
@@ -297,6 +312,9 @@ class Repository:
         record.get("branch"),
         record.get("topic"),
         record["defend_org"],
+        record.get("council_cipher"),
+        record.get("org_address"),
+        record.get("org_phone"),
         record.get("date_defend"),
         int(record["is_pilot_branch"]),
       ),

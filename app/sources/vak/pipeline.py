@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import sqlite3
-
 from app.db.repository import Repository
 from app.sources.http_client import HttpClient
 from app.sources.vak.client import VakClient
@@ -20,10 +18,10 @@ def run_vak(
 ) -> None:
   """Fetch VAK records for both is_pilot branches (FR-004).
 
-  max_pages caps how many pages are fetched per branch — intended for quick
-  exploratory/smoke runs only (see config.limits.vak_max_pages). Leave it
-  None for a real full run: the checkpoint logic assumes the false-branch
-  cursor represents genuine progress through the whole dataset.
+  List endpoint returns only fio/topic/date — detail card is fetched per id for
+  specialty, branch, defend_org, org_address, org_phone (see vak-analysis.md).
+
+  max_pages caps pages per branch for smoke runs (config.limits.vak_max_pages).
   """
   start_page = repo.get_vak_checkpoint(run_id) + 1
 
@@ -34,7 +32,11 @@ def run_vak(
       pages_fetched = 0
       for page, items in vak.iter_pages(is_pilot=is_pilot, start_page=branch_start):
         for item in items:
-          repo.upsert_vak_record(parse_vak_record(item, is_pilot_branch=is_pilot))
+          vak_id = item.get("id")
+          detail = vak.fetch_detail(str(vak_id)) if vak_id else None
+          repo.upsert_vak_record(
+            parse_vak_record(item, detail, is_pilot_branch=is_pilot)
+          )
         if not is_pilot:
           repo.mark_step_done(
             run_id,

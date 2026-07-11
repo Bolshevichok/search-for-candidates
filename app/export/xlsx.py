@@ -1,4 +1,4 @@
-"""XLSX export per contracts/xlsx-contract.md."""
+"""XLSX export: separate site and VAK sheets."""
 
 from __future__ import annotations
 
@@ -10,8 +10,12 @@ from typing import Any
 from openpyxl import Workbook
 
 from app.db.repository import Repository
+from app.sources.vak.parser import split_specialty
 
-CANDIDATE_COLUMNS = [
+SITE_STATUSES = frozenset({"site_no_vak", "site_and_vak", "site_and_vak_probable"})
+VAK_STATUSES = frozenset({"vak_no_site", "site_and_vak", "site_and_vak_probable"})
+
+SITE_COLUMNS = [
   "full_name",
   "match_status",
   "needs_review",
@@ -19,29 +23,30 @@ CANDIDATE_COLUMNS = [
   "department",
   "degree",
   "disciplines",
-  "defense_date",
-  "dissertation_type",
-  "specialty",
-  "branch",
-  "topic",
-  "defend_org",
-  "is_pilot",
   "email",
   "phone",
-  "contact_type",
   "contact_url",
   "vk_url",
   "vk_score",
   "vk_status",
-  "source_notes",
 ]
 
-STATUS_NOTES = {
-  "site_and_vak": "Совпадение ФИО и организации",
-  "site_and_vak_probable": "Совпадение ФИО, организация отличается",
-  "vak_no_site": "Только ВАК",
-  "site_no_vak": "Только сайт вуза",
-}
+VAK_COLUMNS = [
+  "full_name",
+  "match_status",
+  "needs_review",
+  "branch",
+  "specialty_code",
+  "specialty_name",
+  "dissertation_type",
+  "topic",
+  "defense_date",
+  "defend_org",
+  "council_cipher",
+  "org_address",
+  "org_phone",
+  "is_pilot",
+]
 
 
 def _latest_defense(defenses_json: str | None) -> dict[str, Any]:
@@ -53,12 +58,37 @@ def _latest_defense(defenses_json: str | None) -> dict[str, Any]:
   return max(items, key=lambda d: d.get("date") or "")
 
 
+def _defense_fields(defense: dict[str, Any]) -> dict[str, Any]:
+  specialty = defense.get("specialty")
+  code = defense.get("specialty_code") or ""
+  name = defense.get("specialty_name") or ""
+  if specialty and not code and not name:
+    code, name = split_specialty(specialty)
+  return {
+    "branch": defense.get("branch") or "",
+    "specialty_code": code,
+    "specialty_name": name,
+    "dissertation_type": defense.get("dissertation_type") or "",
+    "topic": defense.get("topic") or "",
+    "defense_date": defense.get("date") or "",
+    "defend_org": defense.get("defend_org") or "",
+    "council_cipher": defense.get("council_cipher") or "",
+    "org_address": defense.get("org_address") or "",
+    "org_phone": defense.get("org_phone") or "",
+    "is_pilot": defense.get("is_pilot") if defense else "",
+  }
+
+
 def export_xlsx(repo: Repository, output_path: Path) -> Path:
   output_path.parent.mkdir(parents=True, exist_ok=True)
   wb = Workbook()
-  ws_candidates = wb.active
-  ws_candidates.title = "candidates"
-  ws_candidates.append(CANDIDATE_COLUMNS)
+
+  ws_site = wb.active
+  ws_site.title = "site_employees"
+  ws_site.append(SITE_COLUMNS)
+
+  ws_vak = wb.create_sheet("vak_candidates")
+  ws_vak.append(VAK_COLUMNS)
 
   universities = {
     int(row["university_id"]): row
@@ -66,35 +96,50 @@ def export_xlsx(repo: Repository, output_path: Path) -> Path:
   }
 
   for row in repo.execute("SELECT * FROM candidates ORDER BY candidate_id").fetchall():
+    status = row["match_status"]
     uni = universities.get(int(row["university_id"])) if row["university_id"] else None
-    defense = _latest_defense(row["defenses"])
     disciplines = json.loads(row["disciplines"] or "[]") if row["disciplines"] else []
-    ws_candidates.append(
-      [
-        row["full_name"],
-        row["match_status"],
-        bool(row["needs_review"]),
-        uni["official_name"] if uni else "",
-        row["department_id"] or "",
-        row["degree"] or "",
-        "; ".join(disciplines),
-        defense.get("date") or "",
-        defense.get("dissertation_type") or "",
-        defense.get("specialty") or "",
-        defense.get("branch") or "",
-        defense.get("topic") or "",
-        defense.get("defend_org") or "",
-        defense.get("is_pilot") if defense else "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        STATUS_NOTES.get(row["match_status"], row["match_status"]),
-      ]
-    )
+    defense = _latest_defense(row["defenses"])
+    vak_fields = _defense_fields(defense)
+
+    if status in SITE_STATUSES:
+      ws_site.append(
+        [
+          row["full_name"],
+          status,
+          bool(row["needs_review"]),
+          uni["official_name"] if uni else "",
+          row["department_id"] or "",
+          row["degree"] or "",
+          "; ".join(disciplines),
+          row["email"] or "",
+          row["phone"] or "",
+          row["contact_source_url"] or "",
+          row["vk_url"] or "",
+          row["vk_score"] if row["vk_score"] is not None else "",
+          row["vk_status"] or "",
+        ]
+      )
+
+    if status in VAK_STATUSES:
+      ws_vak.append(
+        [
+          row["full_name"],
+          status,
+          bool(row["needs_review"]),
+          vak_fields["branch"],
+          vak_fields["specialty_code"],
+          vak_fields["specialty_name"],
+          vak_fields["dissertation_type"],
+          vak_fields["topic"],
+          vak_fields["defense_date"],
+          vak_fields["defend_org"],
+          vak_fields["council_cipher"],
+          vak_fields["org_address"],
+          vak_fields["org_phone"],
+          vak_fields["is_pilot"],
+        ]
+      )
 
   ws_namesakes = wb.create_sheet("possible_namesakes")
   ws_namesakes.append(

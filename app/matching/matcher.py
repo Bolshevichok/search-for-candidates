@@ -10,6 +10,7 @@ from rapidfuzz import fuzz, process
 
 from app.db.repository import Repository
 from app.matching.normalize import normalize_organization
+from app.sources.vak.parser import split_specialty
 
 _DEGREE_RANK = {
   "кандидат": 1,
@@ -62,13 +63,20 @@ def _fields_conflict(site: dict[str, Any], vak: dict[str, Any]) -> str | None:
 
 
 def _defense_from_vak(vak: dict[str, Any]) -> dict[str, Any]:
+  specialty = vak.get("specialty")
+  code, name = split_specialty(specialty)
   return {
     "date": vak.get("date_defend"),
-    "specialty": vak.get("specialty"),
+    "specialty": specialty,
+    "specialty_code": code,
+    "specialty_name": name,
     "branch": vak.get("branch"),
     "dissertation_type": vak.get("dissertation_type"),
     "topic": vak.get("topic"),
     "defend_org": vak.get("defend_org"),
+    "council_cipher": vak.get("council_cipher"),
+    "org_address": vak.get("org_address"),
+    "org_phone": vak.get("org_phone"),
     "is_pilot": bool(vak.get("is_pilot_branch")),
   }
 

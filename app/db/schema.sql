@@ -50,6 +50,9 @@ CREATE TABLE IF NOT EXISTS vak_raw (
     branch TEXT,
     topic TEXT,
     defend_org TEXT NOT NULL,
+    council_cipher TEXT,
+    org_address TEXT,
+    org_phone TEXT,
     date_defend TEXT,
     is_pilot_branch INTEGER NOT NULL
 );

@@ -1,4 +1,4 @@
-"""VAK API client with pagination and checkpointing."""
+"""VAK API client with pagination and detail cards."""
 
 from __future__ import annotations
 
@@ -38,3 +38,10 @@ class VakClient:
         if len(results) < PAGE_SIZE:
           break
       page += 1
+
+  def fetch_detail(self, vak_id: str) -> dict[str, Any] | None:
+    url = f"{VAK_BASE_URL}/api/att/adverts/{vak_id}/"
+    response = self.client.get(url)
+    if response.status_code != 200:
+      return None
+    return response.json()
