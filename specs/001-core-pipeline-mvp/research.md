@@ -68,10 +68,11 @@ Report в `constitution.md` — «deferred»), но само наличие те
 
 **Decision**: прямой JSON API `https://vak.gisnauka.ru`, без HTML-скрейпинга:
 - Листинг: `GET /api/att/adverts/?page=N&pageSize=100&is_pilot=false` (и отдельно `is_pilot=true`
-  для вузов с `is_pilot=true` из реестра — обе ветки, не одна, см. FR-004);
-- Полная карточка (если понадобится точечно): `GET /api/att/adverts/<id>/`;
-- Таймаут 8–10 сек/запрос (сервер отвечает 3–5 сек — это нормальный режим, не сбой), retry по
-  политике §Constraints в plan.md.
+  для pilot-вузов — обе ветки, FR-004); list отдаёт только stub (`fio`, `dissertation_name`, `date_defend`);
+- **Detail на каждую запись** (реализовано): `GET /api/att/adverts/<id>/` — `specialty`, `branch`,
+  `defend_org`, `council_cipher`, `org_address`, `org_phone`; detail fetch параллельно
+  (`vak_detail_workers`, по умолчанию 8) внутри каждой страницы list;
+- Таймаут 8–10 сек/запрос, retry по политике §Constraints в plan.md.
 
 **Rationale**: Проверено вживую (`vak-analysis.md`, §2) — API открыт, без авторизации, без CORS и
 капчи, отдаёт чистый JSON. Поля ответа (`fio`, `dissertation_type`, `specialty`, `branch`,

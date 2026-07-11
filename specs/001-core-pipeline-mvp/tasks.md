@@ -207,16 +207,15 @@ layer2/VK колонками), и жёстко застраховаться от
 
 ### Implementation for User Story 3
 
-- [x] T033 [US3] Implement the `candidates` sheet in `app/export/xlsx.py` per
-  `contracts/xlsx-contract.md` (flattening `defenses[]` to the latest-by-date defense per row;
-  layer2/VK columns always present, always empty in this feature)
+- [x] T033 [US3] Implement `site_employees` and `vak_candidates` sheets in `app/export/xlsx.py` per
+  `contracts/xlsx-contract.md` (merged rows on both sheets; layer2/VK columns empty in this feature)
 - [x] T034 [US3] Implement the `possible_namesakes`, `university_errors`, and `run_meta` sheets in
   `app/export/xlsx.py` per `contracts/xlsx-contract.md`
 - [x] T035 [US3] Wire `app export` in `app/cli.py` to read purely from `data/state.sqlite` (T033,
   T034) with zero network calls (SC-007)
-- [x] T036 [US3] Implement `app run` orchestration in `app/cli.py`: sequential `layer1 → vak →
-  match → export`, resuming an in-progress `run` via `runs`/`run_steps` (T008) unless `--full` is
-  passed, with the FR-016 fail-fast check (T009/T012) actually blocking before any step starts
+- [x] T036 [US3] Implement `app run` orchestration in `app/cli.py`: ingest via `app/pipeline/ingest.py`
+  (`layer1` ∥ `vak` when both enabled) → `match` → `export`, resuming via `runs`/`run_steps` (T008)
+  unless `--full`, with FR-016 fail-fast before any step starts
 - [x] T037 [US3] Implement `app status` in `app/cli.py`: print university counts by
   `layer1_status`, row counts for `employees_raw`/`vak_raw`/`candidates`,
   `data/state.sqlite` size, and whether the last run finished or was interrupted
@@ -336,6 +335,11 @@ developers.
 
 ## Notes
 
+- **Post-M1 enhancements (2026-07, reflected in architecture docs):** parallel ingest
+  (`app/pipeline/ingest.py`); VAK detail fetch per record + `vak_detail_workers`; layer1 parallel
+  per university + `employee_merge.py` dedup; extra site fields (post, academic_title, teaching_*);
+  xlsx split into `site_employees` + `vak_candidates` (replaces single `candidates` sheet). Spec/plan
+  updated accordingly; smoke5 empirical timing ~4 min.
 - **Post-implementation removal of the test suite.** T014/T015/T023/T032 (pytest unit tests) and
   `tests/unit/` were removed after implementation, per an explicit user decision that this project
   does not carry an automated test suite — the tasks above remain checked as a historical record

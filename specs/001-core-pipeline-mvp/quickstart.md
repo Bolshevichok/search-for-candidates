@@ -1,15 +1,15 @@
-# Quickstart: проверка Core Pipeline Foundation
+# Quickstart: проверка Core Pipeline MVP
 
-Как убедиться, что фича работает, без чтения кода. Предполагается Python 3.12+ venv с
-зависимостями из `pyproject.toml`/`requirements.txt` (создаётся в рамках задач этой фичи).
+Как убедиться, что фича работает, без чтения кода.
 
 ## Предусловия
 
-- `data/university_registry.csv` существует и содержит хотя бы несколько вузов с рабочим `domain`
-  (готовый файл уже есть в репозитории — `university_registry/README.md`).
-- `config.yaml` в корне репозитория со значениями по умолчанию из этой фичи:
+- Python 3.12+ venv с зависимостями из `pyproject.toml`.
+- `data/university_registry.csv` — в репозитории; у записей для layer1 нужен непустой `domain`.
+- Конфиги: `config.yaml` (полный прогон), `config.smoke5.yaml` (smoke: 5 вузов, 15 страниц VAK).
 
 ```yaml
+# config.smoke5.yaml (фрагмент)
 run:
   layer1: true
   vak: true
@@ -17,65 +17,57 @@ run:
   layer2: false
   vk: false
 limits:
-  request_delay_sec: 1.5
-  max_universities: 5   # для быстрой проверки; null — для полного прогона
+  request_delay_sec: 1.0
+  max_universities: 5
+  vak_max_pages: 15
+  layer1_workers: 4
+  vak_detail_workers: 8
 ```
 
-## Сценарий 1 — US1: слой 1 не падает на недоступном вузе
+## Smoke-прогон (рекомендуется)
 
 ```bash
-python -m app step layer1 --config config.yaml
+python -m app reset
+python -m app --config config.smoke5.yaml run --out output/smoke5.xlsx --full
 python -m app status
 ```
 
-**Ожидаемо**: в `status` видно `universities_ok` + `universities_error` = `max_universities`; если
-среди пробных 5 вузов есть недоступный — он не остановил обход остальных (см. `spec.md`, US1,
-Acceptance Scenario 2). Для проверки чекпоинта: прервать команду (Ctrl+C) после 2–3 вузов и
-перезапустить — лог не должен показывать повторный запрос к уже обработанным доменам (US1, Scenario
-3).
+**Ожидаемо:** ~4–5 мин; `output/smoke5.xlsx` с листами `site_employees`, `vak_candidates`, `possible_namesakes`, `university_errors`, `run_meta`. Layer1 и VAK идут параллельно до match.
 
-## Сценарий 2 — US2: 4 статуса и `possible_namesakes`
+## Сценарий 1 — layer1 и ошибки реестра
 
 ```bash
-python -m app step vak --config config.yaml
-python -m app step match --config config.yaml
+python -m app step layer1 --config config.smoke5.yaml
+python -m app status
 ```
 
-**Ожидаемо**: открыть `data/state.sqlite` (например, через `sqlite3` CLI или DB Browser) и
-проверить `SELECT match_status, COUNT(*) FROM candidates GROUP BY match_status;` — только 4
-значения, без NULL и без пятого. `SELECT * FROM possible_namesakes;` — если реестр содержит вуз с
-известной коллизией ФИО, здесь появится строка, а обе связанные карточки в `candidates` сохраняют
-свой обычный `match_status` и `needs_review = true` (US2, Acceptance Scenario 3).
+**Ожидаемо:** вузы с пустым `domain` → `unresolved_domain` (HTTP не вызывался); остальные обрабатываются параллельно; недоступный вуз не останавливает обход.
 
-## Сценарий 3 — US3: полный `run` без layer2/VK и повторный `export`
+## Сценарий 2 — VAK detail + match
 
 ```bash
-python -m app run --config config.yaml
+python -m app step vak --config config.smoke5.yaml
+python -m app step match --config config.smoke5.yaml
 ```
 
-**Ожидаемо**: код возврата 0; в `logs/run_*.log` нет обращений к коду `app/sources/universities/
-layer2.py` или `app/vk/`; в `output/` появляется один `candidates_*.xlsx` с листами `candidates`,
-`possible_namesakes`, `university_errors`, `run_meta` (структура — `contracts/xlsx-contract.md`); в
-листе `candidates` колонки `email`/`phone`/`vk_url`/`vk_score`/`vk_status` существуют, но пустые во
-всех строках.
+**Ожидаемо:** `vak_raw` с заполненными specialty/branch/defend_org; `candidates` — только 4 значения `match_status`.
 
-Затем:
+## Сценарий 3 — export без сети
 
 ```bash
-python -m app export --out output/candidates_recheck.xlsx
+python -m app export --out output/recheck.xlsx
 ```
 
-**Ожидаемо**: команда завершается за секунды (без сетевых запросов — только чтение
-`data/state.sqlite`), новый файл эквивалентен предыдущему по содержимому `candidates` (US3,
-Acceptance Scenario 3 / `spec.md` SC-007).
+**Ожидаемо:** секунды, без HTTP; два листа людей (`site_employees`, `vak_candidates`).
 
-## Сценарий 4 — FR-016: защита от преждевременного включения layer2/vk
+## Сценарий 4 — FR-016
 
-Изменить в `config.yaml` `run.vk: true`, оставив layer2/vk нереализованными, и запустить:
+Включить `run.vk: true` при нереализованном vk → `run` падает до ingest.
 
-```bash
-python -m app run --config config.yaml
-```
+## Что смотреть в xlsx
 
-**Ожидаемо**: команда немедленно завершается ошибкой о нереализованном шаге, до начала layer1/vak
-(не частичный/обманчивый xlsx, не тихий пропуск флага).
+- **`site_employees`:** post, academic_title, spec_experience, source_url; без дублей ФИО+вуз.
+- **`vak_candidates`:** specialty_code/name, branch, org_address/phone.
+- **`university_errors`:** `unresolved_domain` = дописать domain в CSV, не проблема сайта.
+
+Контракт листов: `specs/001-core-pipeline-mvp/contracts/xlsx-contract.md`.

@@ -7,13 +7,10 @@
 ## Summary
 
 Собрать первую рабочую половину пайплайна: слой 1 (сотрудники сайтов вузов из
-`/sveden/employees`), выгрузка ВАК (объявления о защитах) и матчер, объединяющий их в единую
-карточку кандидата с одним из 4 статусов совпадения. Всё это — один консольный `run`, идемпотентный
-по чекпоинтам в `data/state.sqlite`, с экспортом в `output/candidates_*.xlsx`. Слой 2 (контакты) и
-VK — пустые заготовки-модули без логики, не подключённые к CLI; `run`/`export` работают полноценно
-без них (`layer2: false`, `vk: false` по умолчанию). Технический подход — прямая реализация того,
-что уже зафиксировано в `research/pipeline/app-architecture.md` (M0+M1) и
-`research/pipeline/candidate-pipeline-architecture.md` (§1–5, §8 частично), без новой архитектуры.
+`/sveden/employees`), выгрузка ВАК (list + **detail** на каждую запись) и матчер, объединяющий их в
+единую карточку кандидата с одним из 4 статусов. Ingest: **layer1 ∥ VAK** (`app/pipeline/ingest.py`);
+внутри — параллель по вузам (`layer1_workers`) и parallel detail fetch (`vak_detail_workers`).
+Экспорт — два листа людей (`site_employees`, `vak_candidates`). Слой 2 и VK — заготовки без логики.
 
 ## Technical Context
 
@@ -39,16 +36,15 @@ Windows, должно работать и на Linux — без os-specific вы
 
 **Project Type**: единый проект — консольный пакет (`app-architecture.md`, §1: батч-CLI, не веб)
 
-**Performance Goals**: на реестре из ~1000 вузов (см. `data/university_registry.csv`) первый полный
-прогон слоя 1 — часы (параллелизм ~10 доменов), не сутки; полная выгрузка ВАК (~164 045 записей,
-`is_pilot=false`) через постраничный API — десятки минут при 5–10 параллельных запросах; для вузов с
-`is_pilot=true` — дополнительный проход по второй ветке (~20 190 записей). Точные числа не
-подтверждены на реальных данных (см. `app-architecture.md`, §8) — цель этой фичи не побить SLA, а
-пройти весь реестр без ручной остановки и без обвала на отдельных вузах
+**Performance Goals**: на реестре из ~1000 вузов первый полный прогон слоя 1 — часы (`layer1_workers`,
+по умолчанию 4 параллельных домена), не сутки; ingest wall-clock ≈ **max(layer1, vak)**, не сумма.
+Полная выгрузка ВАК (~164k detail-запросов) — ориентир **десятки минут** при `vak_detail_workers=8`
+(smoke5: 2865 detail ≈ 4 мин); обе ветки `is_pilot` для pilot-вузов. Точные числа — см.
+`app-architecture.md`, §8.
 
-**Constraints**: задержка 1–2 сек на запрос к одному домену вуза, ~10 параллельных доменов
-одновременно (сайты независимы); таймаут ВАК API 8–10 сек/запрос (сервер сам по себе медленный —
-это норма); до 3 повторов с backoff 1с→2с→4с на сеть/5xx, без повтора на 4xx (Принцип VI конституции)
+**Constraints**: задержка 1–2 сек на запрос к одному домену вуза; `layer1_workers` параллельно по разным
+доменам; VAK list — последовательно, detail — параллельно (`vak_detail_workers`, по умолчанию 8);
+таймаут ВАК API 8–10 сек/запрос; до 3 повторов с backoff 1с→2с→4с на сеть/5xx (Принцип VI).
 
 **Scale/Scope**: ~1000 вузов в `university_registry.csv`, ~164 045 записей ВАК (`is_pilot=false`) +
 ~20 190 (`is_pilot=true`); порядок кандидатов — десятки-сотни тысяч сотрудников вузов после дедупа
@@ -94,27 +90,32 @@ specs/001-core-pipeline-mvp/
 app/
 ├── cli.py                       # argparse: run / step layer1|vak|match / export / status / reset
 ├── config.py                    # чтение config.yaml + .env, дефолты layer2=false, vk=false
+├── pipeline/
+│   └── ingest.py                # layer1 ∥ vak до match (ThreadPoolExecutor)
 ├── registry/
 │   └── loader.py                # чтение data/university_registry.csv → строки universities
 ├── sources/
+│   ├── http_client.py           # единый retry/backoff для ВАК и сайтов
 │   ├── vak/
-│   │   ├── client.py             # httpx-клиент /api/att/adverts/, retry/backoff, is_pilot=both
-│   │   └── parser.py             # маппинг JSON-полей API → VakRecord
+│   │   ├── client.py             # list + detail /api/att/adverts/{id}/
+│   │   ├── pipeline.py           # пагинация list, parallel detail fetch
+│   │   └── parser.py             # merge list stub + detail → VakRecord
 │   └── universities/
-│       ├── layer1.py             # /sveden/employees (индекс) → страницы программ → itemprop → EmployeeRaw
-│       ├── struct.py             # /sveden/struct → канонические department_id (используется layer1 и будущим layer2)
-│       └── layer2.py             # ЗАГОТОВКА: докстринг с контрактом §6.6, без реализации, не вызывается из cli.py
+│       ├── layer1.py             # /sveden/employees → program pages → itemprop; parallel per uni
+│       ├── struct.py             # /sveden/struct → канонический department_id
+│       └── layer2.py             # ЗАГОТОВКА: контракт §6.6, без реализации
 ├── matching/
-│   ├── normalize.py              # ФИО/организация: регистр, ё→е, пробелы, дефисы, алиасы вуза
-│   ├── identity_key.py           # normalized_fio + university_id + department_id + стаж (±1-2 года)
+│   ├── normalize.py              # ФИО/организация
+│   ├── identity_key.py           # fio + university_id + department_id + стаж (±2 года)
+│   ├── employee_merge.py         # дедуп сотрудников внутри вуза (FR-003)
 │   └── matcher.py                # 4 статуса + possible_namesakes
 ├── vk/
-│   └── __init__.py               # ЗАГОТОВКА: докстринг с MVP-контрактом vk-matching-spec.md, без реализации
+│   └── __init__.py               # ЗАГОТОВКА: MVP-контракт vk-matching-spec.md
 ├── export/
-│   └── xlsx.py                   # листы candidates / possible_namesakes / university_errors / run_meta
+│   └── xlsx.py                   # site_employees + vak_candidates + служебные листы
 └── db/
-    ├── schema.sql                 # DDL всех таблиц (см. data-model.md)
-    └── repository.py              # CRUD + чекпоинты по runs/run_steps
+    ├── schema.sql
+    └── repository.py              # CRUD + чекпоинты, WAL + busy_timeout
 
 data/
 ├── university_registry.csv        # уже существует, только читаем
