@@ -26,6 +26,8 @@ class Repository:
     self.conn = sqlite3.connect(self.db_path)
     self.conn.row_factory = sqlite3.Row
     self.conn.execute("PRAGMA foreign_keys = ON")
+    self.conn.execute("PRAGMA journal_mode = WAL")
+    self.conn.execute("PRAGMA busy_timeout = 30000")
 
   def close(self) -> None:
     self.conn.close()
@@ -40,7 +42,32 @@ class Repository:
     ddl = SCHEMA_PATH.read_text(encoding="utf-8")
     self.conn.executescript(ddl)
     self._migrate_vak_raw()
+    self._migrate_employees_raw()
+    self._migrate_candidates()
     self.conn.commit()
+
+  def _migrate_employees_raw(self) -> None:
+    existing = {row["name"] for row in self.execute("PRAGMA table_info(employees_raw)")}
+    for col, col_type in (
+      ("teaching_level", "TEXT"),
+      ("employee_qualification", "TEXT"),
+      ("prof_development", "TEXT"),
+      ("teaching_op", "TEXT"),
+    ):
+      if col not in existing:
+        self.execute(f"ALTER TABLE employees_raw ADD COLUMN {col} {col_type}")
+
+  def _migrate_candidates(self) -> None:
+    existing = {row["name"] for row in self.execute("PRAGMA table_info(candidates)")}
+    for col, col_type in (
+      ("post", "TEXT"),
+      ("academic_title", "TEXT"),
+      ("gen_experience", "INTEGER"),
+      ("spec_experience", "INTEGER"),
+      ("source_url", "TEXT"),
+    ):
+      if col not in existing:
+        self.execute(f"ALTER TABLE candidates ADD COLUMN {col} {col_type}")
 
   def _migrate_vak_raw(self) -> None:
     existing = {row["name"] for row in self.execute("PRAGMA table_info(vak_raw)")}
@@ -234,7 +261,9 @@ class Repository:
         UPDATE employees_raw SET
           fio = ?, fio_normalized = ?, post = ?, degree = ?, academic_title = ?,
           department_raw = ?, department_id = ?, disciplines = ?,
-          gen_experience = ?, spec_experience = ?, source_url = ?
+          gen_experience = ?, spec_experience = ?,
+          teaching_level = ?, employee_qualification = ?, prof_development = ?, teaching_op = ?,
+          source_url = ?
         WHERE employee_id = ?
         """,
         (
@@ -248,6 +277,10 @@ class Repository:
           json.dumps(merged, ensure_ascii=False),
           record.get("gen_experience"),
           record.get("spec_experience"),
+          record.get("teaching_level"),
+          record.get("employee_qualification"),
+          record.get("prof_development"),
+          record.get("teaching_op"),
           record["source_url"],
           existing["employee_id"],
         ),
@@ -258,8 +291,9 @@ class Repository:
         INSERT INTO employees_raw (
           university_id, fio, fio_normalized, post, degree, academic_title,
           department_raw, department_id, disciplines, gen_experience, spec_experience,
+          teaching_level, employee_qualification, prof_development, teaching_op,
           identity_key, source_url
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
           record["university_id"],
@@ -273,6 +307,10 @@ class Repository:
           json.dumps(disciplines, ensure_ascii=False),
           record.get("gen_experience"),
           record.get("spec_experience"),
+          record.get("teaching_level"),
+          record.get("employee_qualification"),
+          record.get("prof_development"),
+          record.get("teaching_op"),
           record["identity_key"],
           record["source_url"],
         ),
@@ -331,11 +369,12 @@ class Repository:
       """
       INSERT INTO candidates (
         candidate_id, full_name, identity_key, match_status, needs_review,
-        university_id, department_id, degree, disciplines, defenses,
+        university_id, department_id, post, degree, academic_title, disciplines,
+        gen_experience, spec_experience, source_url, defenses,
         email, phone, contact_type, contact_source_url,
         vk_url, vk_score, vk_status, candidate_content_hash,
         first_seen_run_id, last_seen_run_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, ?)
       ON CONFLICT(candidate_id) DO UPDATE SET
         full_name = excluded.full_name,
         identity_key = excluded.identity_key,
@@ -343,8 +382,13 @@ class Repository:
         needs_review = excluded.needs_review,
         university_id = excluded.university_id,
         department_id = excluded.department_id,
+        post = excluded.post,
         degree = excluded.degree,
+        academic_title = excluded.academic_title,
         disciplines = excluded.disciplines,
+        gen_experience = excluded.gen_experience,
+        spec_experience = excluded.spec_experience,
+        source_url = excluded.source_url,
         defenses = excluded.defenses,
         candidate_content_hash = excluded.candidate_content_hash,
         last_seen_run_id = excluded.last_seen_run_id
@@ -357,8 +401,13 @@ class Repository:
         int(record.get("needs_review", False)),
         record.get("university_id"),
         record.get("department_id"),
+        record.get("post"),
         record.get("degree"),
+        record.get("academic_title"),
         json.dumps(record.get("disciplines") or [], ensure_ascii=False) if record.get("disciplines") is not None else None,
+        record.get("gen_experience"),
+        record.get("spec_experience"),
+        record.get("source_url"),
         json.dumps(record.get("defenses") or [], ensure_ascii=False) if record.get("defenses") is not None else None,
         record["candidate_content_hash"],
         record["first_seen_run_id"],

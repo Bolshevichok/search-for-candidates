@@ -37,8 +37,8 @@ flowchart LR
     end
 
     subgraph engine [Движок батча]
-        s1["1. Layer1\n/sveden/employees\nпараллельно, ~10 доменов сразу"]
-        s2["2. VAK API\nвыгрузка (инкрементально после 1-го прогона)"]
+        s1["1. Layer1\n/sveden/employees\nпараллельно: 1 вуз = 1 поток"]
+        s2["2. VAK API\nlist + detail на запись\nпараллельно с layer1 до match"]
         s3["3. Match\n4 статуса: site_and_vak(_probable) / vak_no_site / site_no_vak"]
         s4["4. Layer2 контакты\nОБЯЗАТЕЛЬНО\n(есть вуз, если карточка изменилась)"]
         s5["5. VK group search\nОБЯЗАТЕЛЬНО, батчами через execute()"]
@@ -75,7 +75,7 @@ flowchart LR
 | Конфиг | `config.yaml` + `.env` | Список режимов, таймауты, пути; секреты (VK token) отдельно |
 | Выгрузка | `openpyxl` → `.xlsx` | То, что заказчик открывает в Excel |
 | Оркестрация | один пакет `app` + CLI (`typer` / `argparse`) | Без Airflow/K8s на MVP |
-| Параллелизм | пул потоков (`concurrent.futures.ThreadPoolExecutor`), ~10 воркеров | слой 1 и слой 2 бьются по доменам вузов — один вуз = один независимый обход, поэтому просто параллелим по доменам, без очередей задач/брокеров |
+| Параллелизм | `ThreadPoolExecutor`: layer1 — по одному вузу на поток; layer1 и VAK — параллельно до match (порядок ingest не важен) | SQLite WAL + `busy_timeout`; один writer на upsert через connection per thread |
 
 Сервер, Docker, очередь задач — **не нужны**, пока крутится на одной машине оператора. Docker можно добавить позже как «упаковали зависимости», не как архитектуру.
 
@@ -85,7 +85,7 @@ flowchart LR
 
 | Источник | Что лечим ретраем | Политика |
 |---|---|---|
-| ВАК API | сеть/таймаут, 5xx; сервер сам по себе медленный (3–5 сек/запрос — это норма, не сбой) | таймаут 8–10 сек, до 3 повторов с экспоненциальным backoff (1с → 2с → 4с) только на сетевые ошибки/5xx, не на 4xx |
+| ВАК API | list `/api/att/adverts/` + **detail** `/api/att/adverts/{id}/` на каждую запись; сеть/таймаут, 5xx | list — пагинация; detail — основной объём запросов. Таймаут 8–10 сек, до 3 повторов с backoff на сеть/5xx |
 | Layer1 / Layer2 (сайты вузов) | сеть/таймаут, 5xx, временный 403 | до 3 повторов с backoff; постоянный 403 — не ретраим бесконечно, переключаемся на headless/прокси (механизм общий для слоя 1 и слоя 2, описан в `candidate-pipeline-architecture.md`, §6.3 — там просто исторически находится, привязки только к слою 2 нет), а после — в `university_errors` |
 | VK API | код 6/9 (rate limit / flood control) | backoff 1с → 2с → 4с → 8с; код 5 (токен) — refresh, не ретрай |
 
@@ -99,6 +99,8 @@ flowchart LR
 app/
   cli.py                 # run / step / export / status / reset
   config.py
+  pipeline/
+    ingest.py            # layer1 и VAK параллельно до match
   registry/              # загрузка university_registry
   sources/
     vak/                 # клиент API ВАК, пагинация, is_pilot
@@ -181,6 +183,9 @@ run:
 # VK_TOKEN обязателен в .env, иначе run падает на шаге vk
 limits:
   request_delay_sec: 1.5
+  layer1_workers: 4
+  vak_request_delay_sec: 0.0
+  vak_detail_workers: 8
   max_universities: null   # или 10 для пробного прогона
 ```---
 
@@ -188,17 +193,26 @@ limits:
 
 Один файл, несколько листов:
 
-**Лист `candidates` (главный)** — одна строка = один человек:
+**Лист `site_employees`** — сотрудники с сайтов вузов (`site_no_vak`, `site_and_vak`, `site_and_vak_probable`):
 
-| Колонки (черновик) | Откуда |
+| Колонки | Откуда |
 |---|---|
-| full_name, match_status | матчер — закрытый список из 4 значений: `site_and_vak` / `site_and_vak_probable` / `vak_no_site` / `site_no_vak` |
-| university, department, degree, disciplines | слой 1 (пусто у `vak_no_site`) |
-| defense_date, dissertation_type, specialty, branch, topic, defend_org, is_pilot | ВАК (`specialty` — «код - название» одной строкой, как в API; `branch` — более крупная отрасль науки текстом; оба поля отдаются API как есть, см. `vak-analysis.md`) |
-| email, phone, contact_type, contact_url | слой 2 |
-| vk_url, vk_score, vk_status | VK (обязательный шаг; канонические значения `vk_status` — `candidates_found` / `not_found` / `skipped_no_group` / `error`, см. `vk-matching-spec.md`, §7) |
-| needs_review | `true`, если строка участвует в записи на листе `possible_namesakes` (вероятный тёзка) — **не** при обычном отсутствии записи в одном из источников, это не повод для пометки. Не влияет на то, попала ли карточка в слой 2/VK — туда карточки попадают по `match_status`, независимо от `needs_review` |
-| source_notes | коротко: `site_and_vak` / `site_and_vak_probable` / `vak_no_site` / `site_no_vak` |
+| full_name, match_status, needs_review | матчер |
+| university, department, post, degree, academic_title | слой 1 |
+| disciplines, gen_experience, spec_experience | слой 1 (`itemprop`) |
+| email, phone, contact_url, vk_* | слой 2 / VK (пусто в MVP) |
+| source_url | страница программы, откуда распарсили |
+
+**Лист `vak_candidates`** — записи ВАК (`vak_no_site`, `site_and_vak`, `site_and_vak_probable`):
+
+| Колонки | Откуда |
+|---|---|
+| branch, specialty_code, specialty_name, dissertation_type, topic | detail-карточка ВАK |
+| defense_date, defend_org, council_cipher, org_address, org_phone, is_pilot | detail-карточка ВАK |
+
+Слияния (`site_and_vak` / `site_and_vak_probable`) попадают **на оба листа**: site-колонки и VAK-колонки соответственно.
+
+**Лист `candidates` (устарел)** — заменён двумя листами выше (MVP build `001-core-pipeline-mvp`).
 
 **Лист `possible_namesakes`** (было `conflicts`) — пары «ВАК ↔ сайт» с одинаковым ФИО, но противоречащими сигналами, которые матчер не смержил автоматически. Это не 5-е значение `match_status` (обе карточки пары сохраняют свой обычный статус — `site_no_vak` и `vak_no_site` — и по-прежнему проходят слой 2/VK как любая другая карточка того же статуса), а отдельная связь-таблица только для этого листа и для `needs_review`. Подробности — `candidate-pipeline-architecture.md`, §4.2.1. Переименован специально: это не «конфликты данных», а гипотеза «вероятно, два разных человека».
 

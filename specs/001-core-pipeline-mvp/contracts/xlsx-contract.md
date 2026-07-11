@@ -1,39 +1,35 @@
 # Contract: xlsx-экспорт
 
-Единственный артефакт, который видит заказчик/оператор (`app-architecture.md`, §1, §7). В рамках
-этой фичи содержимое — только то, что дают layer1 + VAK + матчер; колонки layer2/VK присутствуют,
-но всегда пустые (FR-012, SC-005) — это осознанно, чтобы будущее включение этих шагов не требовало
-менять структуру файла.
+Единственный артефакт, который видит заказчик/оператор (`app-architecture.md`, §7).
 
-## Лист `candidates`
+## Лист `site_employees`
 
-Одна строка = одна карточка кандидата (`candidates` из `data-model.md`).
+Сотрудники с сайтов вузов: `site_no_vak`, `site_and_vak`, `site_and_vak_probable`.
 
-| Колонка | Тип | Заполняется в этой фиче? |
-|---|---|---|
-| `full_name` | текст | да |
-| `match_status` | одно из 4: `site_and_vak` / `site_and_vak_probable` / `vak_no_site` / `site_no_vak` | да |
-| `needs_review` | `true`/`false` | да (по `possible_namesakes`) |
-| `university` | текст | да, пусто у `vak_no_site` |
-| `department` | текст | да, пусто у `vak_no_site` |
-| `degree` | текст | да |
-| `disciplines` | текст (список через `; `) | да, пусто у `vak_no_site` |
-| `defense_date` | дата | да, из `defenses[0]` (первая/последняя защита — см. Note ниже), пусто у `site_no_vak` |
-| `dissertation_type` | текст | да |
-| `specialty` | текст, «код - название» как в API ВАК | да |
-| `branch` | текст | да |
-| `topic` | текст | да |
-| `defend_org` | текст | да |
-| `is_pilot` | `true`/`false` | да |
-| `email`, `phone`, `contact_type`, `contact_url` | — | **нет, всегда пусто** (layer2 не реализован) |
-| `vk_url`, `vk_score`, `vk_status` | — | **нет, всегда пусто** (VK не реализован) |
-| `source_notes` | текст | да, краткое значение `match_status` |
+| Колонка | Заполняется в MVP? |
+|---|---|
+| `full_name`, `match_status`, `needs_review` | да |
+| `university`, `department` | да |
+| `post`, `degree`, `academic_title` | да (layer1) |
+| `disciplines` | да (`; `) |
+| `gen_experience`, `spec_experience` | да (layer1, `itemprop`) |
+| `email`, `phone`, `contact_url` | нет (layer2 не реализован) |
+| `vk_url`, `vk_score`, `vk_status` | нет (VK не реализован) |
+| `source_url` | да |
 
-**Note про несколько защит**: если у кандидата несколько записей `defenses[]` (кандидатская, потом
-докторская), в строку листа `candidates` попадает самая **последняя по дате** защита;
-полный список защит — не теряется, он есть в `data/state.sqlite` (`candidates.defenses` JSON), но
-на xlsx-лист в этой фиче не разворачивается в отдельные строки (не запрошено задачей — можно
-добавить отдельной фичей, если понадобится «одна строка = одна защита»).
+## Лист `vak_candidates`
+
+Записи ВАК: `vak_no_site`, `site_and_vak`, `site_and_vak_probable`.
+
+| Колонка | Заполняется в MVP? |
+|---|---|
+| `full_name`, `match_status`, `needs_review` | да |
+| `branch`, `specialty_code`, `specialty_name` | да (detail API) |
+| `dissertation_type`, `topic`, `defense_date` | да |
+| `defend_org`, `council_cipher`, `org_address`, `org_phone` | да |
+| `is_pilot` | да |
+
+Слияния попадают на **оба** листа с соответствующими колонками.
 
 ## Лист `possible_namesakes`
 
@@ -57,5 +53,5 @@
 |---|---|
 | `run_id`, `started_at`, `finished_at` | |
 | `universities_ok`, `universities_error` | счётчики |
-| `candidates_total` | по каждому из 4 `match_status` — отдельные счётчики колонками |
+| `candidates_total`, счётчики по `match_status` | |
 | `is_full_run` | `true`/`false` |

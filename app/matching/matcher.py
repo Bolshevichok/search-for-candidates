@@ -62,6 +62,16 @@ def _fields_conflict(site: dict[str, Any], vak: dict[str, Any]) -> str | None:
   return None
 
 
+def _site_fields(emp: Any) -> dict[str, Any]:
+  return {
+    "post": emp["post"],
+    "academic_title": emp["academic_title"],
+    "gen_experience": emp["gen_experience"],
+    "spec_experience": emp["spec_experience"],
+    "source_url": emp["source_url"],
+  }
+
+
 def _defense_from_vak(vak: dict[str, Any]) -> dict[str, Any]:
   specialty = vak.get("specialty")
   code, name = split_specialty(specialty)
@@ -133,6 +143,7 @@ def run_match(repo: Repository, run_id: int) -> None:
             "degree": emp["degree"],
             "disciplines": json.loads(emp["disciplines"] or "[]"),
             "defenses": [],
+            **_site_fields(emp),
             "first_seen_run_id": run_id,
             "last_seen_run_id": run_id,
           },
@@ -184,6 +195,7 @@ def run_match(repo: Repository, run_id: int) -> None:
           "degree": emp["degree"] or chosen_vak["dissertation_type"],
           "disciplines": json.loads(emp["disciplines"] or "[]"),
           "defenses": [_defense_from_vak(dict(chosen_vak))],
+          **_site_fields(emp),
           "first_seen_run_id": run_id,
           "last_seen_run_id": run_id,
         },
@@ -203,6 +215,7 @@ def run_match(repo: Repository, run_id: int) -> None:
           "degree": emp["degree"],
           "disciplines": json.loads(emp["disciplines"] or "[]"),
           "defenses": [],
+          **_site_fields(emp),
           "first_seen_run_id": run_id,
           "last_seen_run_id": run_id,
         },

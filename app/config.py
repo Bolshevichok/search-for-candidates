@@ -32,6 +32,9 @@ class Limits:
   request_delay_sec: float = 1.5
   max_universities: int | None = None
   vak_max_pages: int | None = None
+  layer1_workers: int = 4
+  vak_request_delay_sec: float = 0.0
+  vak_detail_workers: int = 8
 
 
 @dataclass
@@ -70,6 +73,9 @@ def load_config(config_path: Path | str = "config.yaml") -> AppConfig:
       request_delay_sec=float(limits_raw.get("request_delay_sec", 1.5)),
       max_universities=int(max_uni) if max_uni is not None else None,
       vak_max_pages=int(vak_max_pages) if vak_max_pages is not None else None,
+      layer1_workers=int(limits_raw.get("layer1_workers", 4)),
+      vak_request_delay_sec=float(limits_raw.get("vak_request_delay_sec", 0.0)),
+      vak_detail_workers=int(limits_raw.get("vak_detail_workers", 8)),
     ),
     config_path=path,
   )
