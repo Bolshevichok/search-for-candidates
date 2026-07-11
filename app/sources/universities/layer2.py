@@ -121,15 +121,15 @@ class YandexLLMParser:
             return None
 
         prompt = f"""Analyze the provided HTML content and extract contact information for {full_name}.
-Extract:
-1. email address (personal or university)
-2. phone number (if available)
+        Extract:
+        1. email address (personal or university)
+        2. phone number (if available)
 
-Return ONLY a JSON object with this structure (no markdown, no backticks):
-{{"email": "email@example.com or null", "phone": "+7... or null", "contact_type": "personal or university or null", "confidence": "high or medium or low"}}
+        Return ONLY a JSON object with this structure (no markdown, no backticks):
+        {{"email": "email@example.com or null", "phone": "+7... or null", "contact_type": "personal or university or null", "confidence": "high or medium or low"}}
 
-HTML content:
-{html[:2000]}"""
+        HTML content:
+        {html[:2000]}"""
 
         try:
             url = "https://llm.api.cloud.yandex.net:443/llm/v1alpha/chat/completion"
