@@ -38,11 +38,26 @@ def cmd_run(args: argparse.Namespace) -> int:
   cfg.validate_implemented_steps()
   with open_repository(args.db) as repo:
     run_id = _prepare_run(repo, cfg, is_full=args.full)
-    run_ingest(repo, run_id, cfg, db_path=args.db)
+    run_ingest(repo, run_id, cfg, db_path=args.db, domain=args.domain)
     if cfg.run.match:
       run_match(repo, run_id)
+    if cfg.run.layer2:
+      # Must run after match: layer2's candidate query filters by
+      # match_status, which run_match() has just populated above. Running
+      # it any earlier (e.g. from inside run_ingest, as before) means the
+      # filter always matches zero rows and layer2 silently does nothing.
+      layer2_limit = args.layer2_limit if args.layer2_limit is not None else cfg.limits.layer2_limit
+      run_layer2(
+        args.db,
+        run_id,
+        request_delay_sec=cfg.limits.layer2_request_delay_sec,
+        workers=cfg.limits.layer2_workers,
+        domain=args.domain,
+        limit=layer2_limit,
+      )
+      repo.mark_step_done(run_id, "layer2", None)
     out = Path(args.out) if args.out else default_output_path()
-    export_xlsx(repo, out)
+    export_xlsx(repo, out, domain=args.domain)
     repo.mark_step_done(run_id, "export", None)
     repo.finish_run(run_id, "success")
     backup_state("post_run", db_path=args.db)
@@ -61,6 +76,7 @@ def cmd_step(args: argparse.Namespace) -> int:
         request_delay_sec=cfg.limits.request_delay_sec,
         max_universities=cfg.limits.max_universities,
         workers=cfg.limits.layer1_workers,
+        domain=args.domain,
       )
     elif args.step_name == "vak":
       run_vak(
@@ -76,7 +92,10 @@ def cmd_step(args: argparse.Namespace) -> int:
         run_id,
         request_delay_sec=cfg.limits.layer2_request_delay_sec,
         workers=cfg.limits.layer2_workers,
+        domain=args.domain,
+        limit=args.limit if args.limit is not None else cfg.limits.layer2_limit,
       )
+      repo.mark_step_done(run_id, "layer2", None)
     elif args.step_name == "match":
       run_match(repo, run_id)
     print(f"Step {args.step_name} completed for run {run_id}.")
@@ -86,7 +105,7 @@ def cmd_step(args: argparse.Namespace) -> int:
 def cmd_export(args: argparse.Namespace) -> int:
   out = Path(args.out)
   with open_repository(args.db, init=False) as repo:
-    export_xlsx(repo, out)
+    export_xlsx(repo, out, domain=args.domain)
   print(f"Exported to {out}")
   return 0
 
@@ -131,15 +150,29 @@ def build_parser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser(prog="app", description="Candidate search pipeline")
   parser.add_argument("--config", default="config.yaml", help="Path to config.yaml")
   parser.add_argument("--db", default=str(DEFAULT_DB_PATH), help="Path to state.sqlite")
+  parser.add_argument(
+    "--domain", default=None,
+    help="Restrict layer1 (and therefore the whole pipeline's output) to a single "
+         "university domain, e.g. --domain utmn.ru",
+  )
   sub = parser.add_subparsers(dest="command", required=True)
 
   p_run = sub.add_parser("run", help="Run full pipeline")
   p_run.add_argument("--full", action="store_true", help="Force full rebuild")
   p_run.add_argument("--out", default=None, help="Output xlsx path")
+  p_run.add_argument(
+    "--layer2-limit", type=int, default=None,
+    help="Override limits.layer2_limit from config for this run, e.g. --layer2-limit 100 "
+         "for a quick test without editing the yaml file",
+  )
   p_run.set_defaults(func=cmd_run)
 
   p_step = sub.add_parser("step", help="Run a single step")
   p_step.add_argument("step_name", choices=["layer1", "vak", "layer2", "match"])
+  p_step.add_argument(
+    "--limit", type=int, default=None,
+    help="layer2 only: max candidates to process (default: config limits.layer2_limit, currently 100)",
+  )
   p_step.set_defaults(func=cmd_step)
 
   p_export = sub.add_parser("export", help="Export xlsx from database")

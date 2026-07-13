@@ -20,5 +20,5 @@ limits:
   vak_detail_workers: 8
 
   # Layer 2 settings (new)
-  layer2_workers: 2                  # Parallel workers for contact search
+  layer2_workers: 6                  # Parallel workers for contact search
   layer2_request_delay_sec: 2.0      # Delay between requests (seconds)

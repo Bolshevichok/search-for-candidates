@@ -84,7 +84,7 @@ def _defense_fields(defense: dict[str, Any]) -> dict[str, Any]:
   }
 
 
-def export_xlsx(repo: Repository, output_path: Path) -> Path:
+def export_xlsx(repo: Repository, output_path: Path, domain: str | None = None) -> Path:
   output_path.parent.mkdir(parents=True, exist_ok=True)
   wb = Workbook()
 
@@ -99,8 +99,15 @@ def export_xlsx(repo: Repository, output_path: Path) -> Path:
     int(row["university_id"]): row
     for row in repo.execute("SELECT * FROM universities").fetchall()
   }
+  allowed_university_ids: set[int] | None = None
+  if domain is not None:
+    allowed_university_ids = {
+      uid for uid, row in universities.items() if row["domain"] == domain
+    }
 
   for row in repo.execute("SELECT * FROM candidates ORDER BY candidate_id").fetchall():
+    if allowed_university_ids is not None and int(row["university_id"] or -1) not in allowed_university_ids:
+      continue
     status = row["match_status"]
     uni = universities.get(int(row["university_id"])) if row["university_id"] else None
     disciplines = json.loads(row["disciplines"] or "[]") if row["disciplines"] else []

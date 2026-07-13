@@ -37,6 +37,12 @@ class Limits:
   vak_detail_workers: int = 8
   layer2_workers: int = 2
   layer2_request_delay_sec: float = 2.0
+  layer2_limit: int = 100
+  layer2_blocked_domain_keywords: list[str] = None  # type: ignore[assignment]
+
+  def __post_init__(self) -> None:
+    if self.layer2_blocked_domain_keywords is None:
+      self.layer2_blocked_domain_keywords = []
 
 
 @dataclass
@@ -80,6 +86,8 @@ def load_config(config_path: Path | str = "config.yaml") -> AppConfig:
       vak_detail_workers=int(limits_raw.get("vak_detail_workers", 8)),
       layer2_workers=int(limits_raw.get("layer2_workers", 2)),
       layer2_request_delay_sec=float(limits_raw.get("layer2_request_delay_sec", 2.0)),
+      layer2_limit=int(limits_raw.get("layer2_limit", 100)),
+      layer2_blocked_domain_keywords=list(limits_raw.get("layer2_blocked_domain_keywords", [])),
     ),
     config_path=path,
   )
