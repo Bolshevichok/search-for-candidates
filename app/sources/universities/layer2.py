@@ -1,43 +1,3 @@
-"""Layer 2 contacts: strict /sveden/employees extraction + AI-assisted fallback crawler.
-
-Input contract (per candidate with a university):
-    {
-        "candidate_id": "c_00123",
-        "full_name": "Иванов Алексей Петрович",
-        "university_domain": "urfu.ru",
-        "department": "Институт радиоэлектроники и информационных технологий"
-    }
-
-Output contract (merged back into candidates by candidate_id):
-    {
-        "candidate_id": "c_00123",
-        "crawl_status": "page_found",
-        "contact_type": "personal",
-        "email": "a.p.ivanov@urfu.ru",
-        "phone": null,
-        "source_url": "https://urfu.ru/.../staff/personov/ivanov-ap",
-        "confidence": "high"
-    }
-
-Two independent paths, tried in this order:
-
-  1. STRICT /sveden/employees path (this module, no LLM, no headless browser).
-     `/sveden/employees` is a page every accredited RU university is legally
-     required to publish (Приказ Рособрнадзора №1493) with a fixed schema.org
-     microdata structure (itemprop="fio", "post", ...). Because the structure
-     is standardized we can parse it deterministically with selectolax, the
-     same way app/sources/universities/layer1.py already does, and match the
-     requested candidate strictly, scoped to that person's own markup block.
-     A plain HTTP GET is enough -- there is no JS rendering on this page, so
-     Crawl4AI (a headless browser) is not used here at all.
-
-  2. FALLBACK generic-site path (Crawl4AI + Yandex LLM), used only when the
-     university has no working /sveden/employees page. This is best-effort,
-     since site structure outside /sveden/ is not standardized.
-
-Full mechanics: candidate-pipeline-architecture.md §6.
-Stub contract: specs/001-core-pipeline-mvp/contracts/future-layer2-vk-stub-contract.md
-"""
 
 from __future__ import annotations
 
@@ -81,6 +41,53 @@ _PHONE_RE = re.compile(
     r"|\+\d{1,3}[\s\-]?\d{7,14}"
 )
 
+_MAX_FALLBACK_PAGES=300
+
+# Добавь в начало файла, рядом с другими константами
+_ALPHABET_KEYWORDS = (
+    "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м",
+    "н", "о", "п", "р", "с", "т", "у", "ф", "х", "ц", "ч", "ш", "щ", "ъ",
+    "ы", "ь", "э", "ю", "я", "А", "Б", "В", "Г", "Д", "Е", "Ё", "Ж", "З",
+    "И", "Й", "К", "Л", "М", "О", "П", "Р", "С", "Т", "У", "Ф", "Х", "Ц",
+    "Ч", "Ш", "Щ", "Ъ", "Ы", "Ь", "Э", "Ю", "Я", "a", "b", "c", "d", "e",
+    "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s",
+    "t", "u", "v", "w", "x", "y", "z", "A", "B", "C", "D", "E", "F", "G",
+    "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U",
+    "V", "W", "X", "Y", "Z"
+)
+
+def _clean_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip()
+
+def _is_alphabet_link(text: str, href: str) -> bool:
+    """Простая эвристика: короткий текст из 1-2 русских букв или ссылка с ?letter= / /a / /b и т.д."""
+    text_clean = _clean_text(text).lower().strip()
+    if len(text_clean) <= 2 and any(c in text_clean for c in _ALPHABET_KEYWORDS):
+        return True
+    href_l = href.lower()
+    return any(p in href_l for p in ("?letter=", "&letter=", "/a/", "/b/", "/letter/"))
+
+
+def _score_internal_link_enhanced(
+    href: str, text: str, target_initial: str | None = None, boost_alphabet: bool = False
+) -> int:
+    """Улучшенный скоринг."""
+    score = _score_internal_link(href, text)
+
+    if _is_alphabet_link(text, href):
+        if target_initial and target_initial.lower() in _clean_text(text).lower():
+            score += 8
+        else:
+            score += 4 if boost_alphabet else 2
+
+    return score
+
+_NAME_INDICATORS = re.compile(r'[А-ЯЁ][а-яё]{2,}\s+[А-ЯЁ][а-яё]', re.IGNORECASE)
+
+def _page_has_any_names(html: str) -> bool:
+    """Быстрая проверка наличия человеческих имён на странице."""
+    text = _html_to_text(html)[:10000]  # не весь текст
+    return bool(_NAME_INDICATORS.search(text))
 
 @dataclass
 class Layer2Contract:
@@ -107,11 +114,6 @@ class Layer2Contract:
             "confidence": self.confidence,
             "error_message": self.error_message,
         }
-
-
-def _clean_text(value: str) -> str:
-    return re.sub(r"\s+", " ", value).strip()
-
 
 def _html_to_text(value: str) -> str:
     text = re.sub(r"<script\b[^<]*(?:(?!</script>)<[^<]*)*</script>", " ", value, flags=re.I)
@@ -674,7 +676,7 @@ def _build_loose_name_pattern(
 # per-candidate request. This cap is generous enough to reach staff pages
 # that are several clicks deep, while keeping one candidate's fallback
 # lookup bounded.
-_MAX_FALLBACK_PAGES = 600
+PAGES__MAX_DEPTH = 600
 
 _STAFF_LINK_TEXT_KEYWORDS = (
     "сотрудник", "преподавател", "кафедр", "контакт", "персонал",
@@ -793,6 +795,42 @@ def _new_site_crawl_state(base_url: str) -> _SiteCrawlState:
         counter=counter,
     )
 
+def _extract_internal_links_enhanced(
+    html: str, base_url: str, blocked_keywords: tuple[str, ...] = (),
+    target_initial: str | None = None, boost_alphabet: bool = False
+) -> list[tuple[int, str]]:
+    """Улучшенная версия извлечения ссылок."""
+    tree = HTMLParser(html)
+    domain = urlparse(base_url).netloc
+    seen: set[str] = set()
+    results: list[tuple[int, str]] = []
+
+    for node in tree.css("a[href]"):
+        href = node.attributes.get("href", "")
+        if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
+            continue
+        absolute = urljoin(base_url, href).split("#", 1)[0]
+        parsed = urlparse(absolute)
+        if parsed.netloc != domain:
+            continue
+        if parsed.path.lower().endswith((
+            ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+            ".zip", ".rar", ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp",
+            ".ico", ".mp4", ".mp3", ".avi", ".css", ".js", ".woff", ".woff2", ".ttf"
+        )):
+            continue
+        if absolute.rstrip("/") == base_url.rstrip("/") or absolute in seen:
+            continue
+        if any(kw.lower() in parsed.netloc.lower() for kw in blocked_keywords if kw.strip()):
+            continue
+
+        seen.add(absolute)
+        text = _clean_text(node.text(separator=" "))
+        score = _score_internal_link_enhanced(absolute, text, target_initial, boost_alphabet)
+        results.append((score, absolute))
+
+    # Сортируем по убыванию скора
+    return sorted(results, reverse=True)
 
 async def _advance_and_find(
     state: _SiteCrawlState,
@@ -800,24 +838,24 @@ async def _advance_and_find(
     client: HttpClient,
     pattern: re.Pattern[str],
     blocked_domain_keywords: tuple[str, ...] = (),
-    max_pages: int = _MAX_FALLBACK_PAGES,
+    max_pages: int = PAGES__MAX_DEPTH,
     request_delay_sec: float = 0.0,
+    full_name: str | None = None,          # Новый параметр
 ) -> tuple[str, str] | None:
-    """Look for a page matching `pattern`, first among pages this domain's
-    crawl has already fetched (`state.pages`, free -- no network calls), and
-    only if that misses, keep walking the site from wherever the shared
-    frontier left off (not from the start), caching every new page fetched
-    into `state.pages` for the next candidate to search first. Pages are
-    still tried staff/contact-likely-first via `_score_internal_link`.
-    """
+    """Улучшенная версия с интеллектуальным приоритетом."""
+    target_last, _, _ = split_fio_parts(full_name or "")
+    target_initial = target_last[0] if target_last else None
+
+    # Сначала ищем среди уже загруженных страниц
     for url, html in state.pages.items():
         if pattern.search(_html_to_text(html)):
             return url, html
+
     if state.exhausted:
         return None
 
     while state.frontier and len(state.visited) < max_pages:
-        _neg_score, _seq, url = heapq.heappop(state.frontier)
+        _, _, url = heapq.heappop(state.frontier)
         norm = url.rstrip("/")
         if norm in state.visited:
             continue
@@ -826,9 +864,16 @@ async def _advance_and_find(
         html = await _fetch_page(url, crawler, client, request_delay_sec)
         if not html:
             continue
-        state.pages[url] = html
 
-        for score, link in _extract_internal_links(html, url, blocked_domain_keywords):
+        state.pages[url] = html
+        has_names = _page_has_any_names(html)
+
+        # Если имён нет — усиливаем приоритет алфавитных ссылок
+        links = _extract_internal_links_enhanced(
+            html, url, blocked_domain_keywords, target_initial, boost_alphabet=not has_names
+        )
+
+        for score, link in links:
             link_norm = link.rstrip("/")
             if link_norm in state.visited or link_norm in state.queued:
                 continue
@@ -852,21 +897,6 @@ async def _fallback_crawl_and_parse(
     crawler: "Crawl4AICrawler | None" = None,
     request_delay_sec: float = 0.0,
 ) -> Layer2Contract:
-    """Best-effort discovery for universities that don't publish a working
-    /sveden/employees page (or that do, but without contact info -- see
-    `crawl_and_parse_contact`). Site structure here is not standardized, so
-    this is the only place Crawl4AI/LLM are used.
-
-    `site_crawl_states`: shared, mutable per-domain crawl progress (see
-    `_SiteCrawlState`). Pass the same dict across every candidate in a run
-    (run_layer2 does this) so the site is only ever crawled as far as
-    needed, and never restarted for a domain already visited.
-
-    `crawler`: a shared `Crawl4AICrawler` wrapping one already-launched
-    browser (see run_layer2) -- avoids relaunching a browser per page.
-    Leave `None` to have this function create its own (launch-per-call),
-    fine for a single one-off lookup but wasteful across many candidates.
-    """
     base_url = f"https://{university_domain}".rstrip("/")
 
     target_last, target_first, target_patr = split_fio_parts(full_name)
@@ -886,15 +916,18 @@ async def _fallback_crawl_and_parse(
 
     if crawler is None:
         crawler = Crawl4AICrawler()
-    parser = YandexLLMParser()
 
     match = await _advance_and_find(
         state, crawler, client, pattern, blocked_domain_keywords,
+        full_name=full_name,                    # Передаём имя
         request_delay_sec=request_delay_sec,
     )
+
     if not match:
         return Layer2Contract(candidate_id=candidate_id, crawl_status="page_not_found")
+
     matched_url, html = match
+    parser = YandexLLMParser()
 
     try:
         parse_result = await parser.parse(html, full_name, candidate_id)
