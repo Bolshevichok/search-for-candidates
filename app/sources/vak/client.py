@@ -27,6 +27,12 @@ class VakClient:
         f"&pageSize={PAGE_SIZE}&is_pilot={'true' if is_pilot else 'false'}"
       )
       response = self.client.get(url)
+      if response.status_code == 404 and page > 1:
+        # The API reports `next` even on the last page, so walking one page
+        # past the end is normal -- a 404 there (including on resume from a
+        # checkpoint that already covered the final page) means the
+        # pagination is simply over, not that the API is broken.
+        break
       if response.status_code != 200:
         raise RuntimeError(f"VAK API HTTP {response.status_code} on page {page}")
       payload = response.json()
