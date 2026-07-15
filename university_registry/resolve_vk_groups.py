@@ -1,13 +1,3 @@
-"""
-Resolve vk_group_id for rows in data/university_registry.csv.
-
-Requires VK_TOKEN in .env or environment (user/service token with groups.search).
-
-Usage:
-  python university_registry/resolve_vk_groups.py
-  python university_registry/resolve_vk_groups.py --limit 20
-  python university_registry/resolve_vk_groups.py --only-missing
-"""
 from __future__ import annotations
 
 import argparse

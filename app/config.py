@@ -1,4 +1,3 @@
-"""Load config.yaml and .env; enforce FR-016 fail-fast for unimplemented steps."""
 
 from __future__ import annotations
 

@@ -1,11 +1,3 @@
-"""
-Build data/university_registry.csv from official Rosobrnadzor accred registry XML.
-
-Source: data/raw/accredreestr.zip (download via university_registry/download_accred_data.py)
-Output columns match project spec:
-  id, official_name, aliases, domain, region, inn, ogrn,
-  accreditation_status, vk_group_id, vk_screen_name, vk_url, is_pilot, source_notes
-"""
 from __future__ import annotations
 
 import csv

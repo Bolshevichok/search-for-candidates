@@ -1,5 +1,3 @@
-"""Resolve canonical department_id from /sveden/struct (FR-002)."""
-
 from __future__ import annotations
 
 import re

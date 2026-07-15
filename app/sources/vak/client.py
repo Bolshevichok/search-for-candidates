@@ -1,5 +1,3 @@
-"""VAK API client with pagination and detail cards."""
-
 from __future__ import annotations
 
 from typing import Any, Iterator
@@ -28,10 +26,6 @@ class VakClient:
       )
       response = self.client.get(url)
       if response.status_code == 404 and page > 1:
-        # The API reports `next` even on the last page, so walking one page
-        # past the end is normal -- a 404 there (including on resume from a
-        # checkpoint that already covered the final page) means the
-        # pagination is simply over, not that the API is broken.
         break
       if response.status_code != 200:
         raise RuntimeError(f"VAK API HTTP {response.status_code} on page {page}")

@@ -1,5 +1,3 @@
-"""Shared HTTP client with unified retry/backoff policy (FR-009, Principle VI)."""
-
 from __future__ import annotations
 
 import ssl
@@ -11,10 +9,6 @@ from tenacity import Retrying, retry_if_exception_type, retry_if_result, stop_af
 
 _RETRYABLE_EXCEPTIONS = (httpx.TimeoutException, httpx.NetworkError, httpx.TransportError)
 
-# A real browser's default headers. Bare python-httpx requests (no UA,
-# no Accept) are an easy signal for anti-bot/DDoS protection (Qrator,
-# DDoS-Guard and similar, common in front of RU gov/edu sites) to drop --
-# which can show up as a mid-handshake ConnectError, not just a 403.
 _BROWSER_HEADERS = {
   "User-Agent": (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -92,12 +86,6 @@ class HttpClient:
       follow_redirects=True,
       verify=ssl_context,
       headers=_BROWSER_HEADERS,
-      # Ignore HTTP_PROXY/HTTPS_PROXY etc. A local proxy (often an
-      # antivirus doing HTTPS inspection, e.g. Kaspersky/ESET) can sit in
-      # the middle and break the TLS handshake before it even reaches the
-      # target site, surfacing as the same
-      # ConnectError: [SSL: UNEXPECTED_EOF_WHILE_READING] -- but from
-      # httpcore's http_proxy transport, not the site itself.
       trust_env=False,
     )
 

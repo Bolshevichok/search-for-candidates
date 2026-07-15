@@ -1,5 +1,3 @@
-"""CLI entry point: run / step / export / status / reset."""
-
 from __future__ import annotations
 
 import argparse

@@ -1,5 +1,3 @@
-"""Layer 1: /sveden/employees index and program pages → employees_raw."""
-
 from __future__ import annotations
 
 import re
@@ -247,7 +245,7 @@ def _run_one_university(
         resolver = DepartmentResolver(client=client)
         runner = Layer1Runner(repo=repo, client=client, resolver=resolver, run_id=run_id)
         runner.process_university(uni)
-  except Exception as exc:  # noqa: BLE001
+  except Exception as exc:
     with open_repository(db_path, init=False) as repo:
       _record_university_failure(repo, run_id, university_id, exc)
 
@@ -281,7 +279,7 @@ def run_layer1(
           university_id = int(uni["university_id"])
           try:
             runner.process_university(uni)
-          except Exception as exc:  # noqa: BLE001
+          except Exception as exc:
             _record_university_failure(repo, run_id, university_id, exc)
     return
 

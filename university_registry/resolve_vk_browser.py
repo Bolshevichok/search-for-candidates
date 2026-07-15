@@ -1,13 +1,3 @@
-"""
-Resolve vk_group_id via browser: scrape VK links from university sites,
-then open VK pages in Chromium to extract group_id.
-
-No VK API token required.
-
-Usage:
-  python university_registry/resolve_vk_browser.py --only-missing --limit 20
-  python university_registry/resolve_vk_browser.py --only-missing
-"""
 from __future__ import annotations
 
 import argparse

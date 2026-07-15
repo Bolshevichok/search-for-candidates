@@ -40,9 +40,6 @@ _PHONE_RE = re.compile(
     r"|\+\d{1,3}[\s\-]?\d{7,14}"
 )
 
-# Transliteration variants for scoring URLs that embed the person's surname
-# (personal pages like /staff/ivanov-i-i/). Two maps because
-# RU->EN transliteration is not standardized: х -> kh|h, й -> y|j, ц -> ts|c
 _TRANSLIT_MAPS = (
     {"а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e",
      "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m",
@@ -73,24 +70,14 @@ _SKIP_EXTENSIONS = (
     ".mp4", ".mp3", ".avi", ".css", ".js", ".woff", ".woff2", ".ttf",
 )
 
-# Слова-стопы: если что-то из этого встречается в URL (хост, путь или query),
-# ссылка не скачивается и вглубь по ней не идём -- это разделы, где контактов
-# сотрудников не бывает (новости, афиша, медиа, абитуриентам, личные кабинеты...).
-# Список легко пополнять.
 _BLOCKED_URL_KEYWORDS = (
-    # новости / события / пресса
     "news", "novost", "press", "media",
     "event", "sobyti", "anons", "afisha", "calendar", "kalendar",
-    # медиатека
     "gallery", "galere", "photo", "foto", "video",
-    # блоги / форумы / архивы
     "blog", "forum", "arhiv", "archive",
-    # абитуриентам / приёмная кампания
     "abitur", "priem", "admission", "postuplen",
-    # служебное: авторизация, корзины, трекинг
     "login", "signin", "signup", "logout", "authoriz", "avtoriz", "register",
     "basket", "cart", "bitrix", "captcha",
-    # версии для печати / RSS / карты сайта
     "print=", "rss", "sitemap", "sveden"
 )
 
@@ -108,13 +95,13 @@ def _clean_text(value: str) -> str:
 class Layer2Contract:
     """Output contract for layer 2."""
     candidate_id: str
-    crawl_status: str  # 'page_found', 'page_not_found', 'page_skipped', 'error'
-    contact_type: str | None = None  # 'personal', 'department', 'institute', 'none'
-    full_name: str | None = None  # Person's full name found on the page
+    crawl_status: str
+    contact_type: str | None = None
+    full_name: str | None = None
     email: str | None = None
     phone: str | None = None
     source_url: str | None = None
-    confidence: str | None = None  # 'high', 'medium', 'low'
+    confidence: str | None = None
     error_message: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -202,10 +189,6 @@ def _relevant_content_for_name(html: str, full_name: str) -> str:
             return plain_text[start:end]
     return _html_to_text(html)[:4000]
 
-
-# ---------------------------------------------------------------------------
-# Contact parsing (Yandex LLM with regex fallback) and page fetching
-# ---------------------------------------------------------------------------
 
 
 class YandexLLMParser:
@@ -452,8 +435,6 @@ def _build_loose_name_pattern(
         alternatives.append(rf"{last_e}\s+{first_initial_e}\.?\s*{patr_initial_e}\.?(?=\W|$)")
         alternatives.append(rf"{first_initial_e}\.?\s*{patr_initial_e}\.?\s+{last_e}(?=\W|$)")
     elif strict:
-        # No patronymic on either side to compare -- strict degrades to the
-        # same as loose here, there's nothing more specific to require.
         alternatives.append(rf"{last_e}\s+{first_initial_e}\.?(?=\W|$)")
         alternatives.append(rf"{first_initial_e}\.?\s+{last_e}(?=\W|$)")
     else:
@@ -472,7 +453,7 @@ async def _fetch_page(
         try:
             response = await asyncio.to_thread(client.get, url)
             html = response.text if response.status_code == 200 else None
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             _LOGGER.debug(f"Failed to fetch {url}: {e}")
             html = None
     if request_delay_sec:
@@ -480,27 +461,8 @@ async def _fetch_page(
     return html
 
 
-# ---------------------------------------------------------------------------
-# Smart priority-driven crawl.
-#
-# Instead of walking links top-to-bottom, every discovered link is scored for
-# how likely it is to lead to THIS candidate's personal/staff page, and the
-# frontier is a priority queue:
-#   - links found in the same markup block as the person's name (the row/card
-#     where the FIO appears) go first -- on alphabet/search index pages the
-#     link right next to the FIO is almost always the personal page;
-#   - alphabet-index links ("А", "Б", ?letter=..) are followed only for the
-#     letter matching the candidate's surname, all other letters are skipped;
-#   - links whose URL/anchor contain the surname (Cyrillic or transliterated)
-#     outrank staff-section links, which outrank everything else;
-#   - pagination gets a small boost, generic navigation sinks to the bottom.
-# The crawl never leaves the university's own site (domain + its subdomains),
-# and page HTML is cached per university, shared across all of its candidates.
-# ---------------------------------------------------------------------------
-
 _SEED_HOST_TEMPLATES = ("{domain}", "www.{domain}")
 
-# Fetch budgets: per-candidate (frontier walk) and per-university (network).
 _MAX_FETCHES_PER_CANDIDATE = 40
 _MAX_FETCHES_PER_DOMAIN = 300
 
@@ -601,8 +563,6 @@ def _links_near_name(
                 seen.add(absolute)
                 out.append(absolute)
         if out:
-            # The smallest matching container type already gave us the
-            # nearest links; larger containers would only add noise.
             break
     return out
 
@@ -637,11 +597,11 @@ def _score_link(
     anchor_low = anchor.lower()
     last_low = target_last.lower()
     if name_pattern is not None and name_pattern.search(anchor):
-        score += 120  # anchor text IS the person's name
+        score += 120
     elif last_low and (last_low in anchor_low or last_low in low):
         score += 100
     if any(t in low for t in translit_variants):
-        score += 80  # transliterated surname in the URL (personal page slug)
+        score += 80
     if any(k in low or k in anchor_low for k in _STAFF_KEYWORDS):
         score += 30
     if _PAGINATION_RE.search(low):
@@ -717,13 +677,11 @@ async def _smart_crawl_for_candidate(
         name_on_page = bool(loose_pattern.search(page_text))
 
         if name_on_page:
-            # The link right next to the FIO is almost certainly the
-            # personal page -- crawl it before anything else.
             for near in _links_near_name(html, url, domain, loose_pattern, blocked_keywords):
                 push(near, 200)
             try:
                 parse_result = await parser.parse(html, full_name, candidate_id)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 _LOGGER.warning(f"Layer2 parse error for {candidate_id} on {url}: {e}")
                 parse_result = None
             if parse_result and (parse_result.get("email") or parse_result.get("phone")):
@@ -755,10 +713,6 @@ async def _smart_crawl_for_candidate(
 
     return best_no_contact
 
-
-# ---------------------------------------------------------------------------
-# Entry points
-# ---------------------------------------------------------------------------
 
 
 async def crawl_and_parse_contact(
@@ -892,13 +846,8 @@ async def _run_layer2_candidates(
     """Process every candidate concurrently, bounded by `workers` at a time,
     sharing one browser instance and one per-domain crawl cache
     (`crawl_states`) across all of them."""
-    # Shared across every candidate in this batch (see `_DomainCrawlState`):
-    # pages fetched for one candidate are reused for the next.
     crawl_states: dict[str, "_DomainCrawlState"] = {}
     semaphore = asyncio.Semaphore(max(1, workers))
-    # sqlite3 writes aren't safe to interleave even across coroutines on one
-    # thread (one task's commit could land mid another's); this only
-    # serializes the (fast) write, not the (slow) crawl/parse work above it.
     write_lock = asyncio.Lock()
 
     with open_repository(db_path) as repo:
@@ -913,10 +862,6 @@ async def _run_layer2_candidates(
                         client=http_client,
                         crawl_states=crawl_states,
                         crawler=crawler,
-                        # HttpClient itself is constructed with delay=0 below;
-                        # this is the single place the delay is applied now,
-                        # right after each real network fetch (see
-                        # _fetch_page), instead of once per candidate.
                         request_delay_sec=request_delay_sec,
                         blocked_keywords=blocked_keywords,
                     )
@@ -939,9 +884,6 @@ async def _run_layer2_candidates(
                 repo.conn.commit()
             _LOGGER.info(f"Processed {contract.candidate_id}: {contract.crawl_status}")
 
-        # request_delay_sec=0.0 here: HttpClient.get() has its own blocking
-        # time.sleep(request_delay_sec) internally, which would double up
-        # with the asyncio.sleep already applied in _fetch_page.
         with HttpClient(request_delay_sec=0.0) as http_client:
             if CRAWL4AI_AVAILABLE:
                 browser_config = BrowserConfig(ignore_https_errors=True, verbose=False)
