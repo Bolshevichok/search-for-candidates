@@ -16,7 +16,7 @@ registry CSV
            export → site_employees + vak_candidates (+ errors, meta)
 ```
 
-Layer2 contacts and VK are stubbed (`run.layer2` / `run.vk` must stay `false` in this build).
+Layer2 contacts are not implemented yet (`run.layer2` must stay `false` in this build).
 
 ## Setup
 

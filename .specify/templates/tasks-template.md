@@ -9,7 +9,8 @@ description: "Task list template for feature implementation"
 
 **Prerequisites**: plan.md (required), spec.md (required for user stories), research.md, data-model.md, contracts/
 
-**Tests**: The examples below include test tasks. Tests are OPTIONAL - only include them if explicitly requested in the feature specification.
+**Verification**: Include manual CLI validation and SQLite/XLSX review. Automated test tasks are
+not generated for this project.
 
 **Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
 
@@ -63,11 +64,11 @@ description: "Task list template for feature implementation"
 
 Examples of foundational tasks (adjust based on your project):
 
-- [ ] T004 Setup database schema and migrations framework
+- [ ] T004 Update the SQLite schema directly for the shared data model
 - [ ] T005 [P] Implement authentication/authorization framework
 - [ ] T006 [P] Setup API routing and middleware structure
 - [ ] T007 Create base models/entities that all stories depend on
-- [ ] T008 Configure error handling and logging infrastructure
+- [ ] T008 Add the minimal required error handling and CLI failure output
 - [ ] T009 Setup environment configuration management
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
@@ -242,6 +243,11 @@ With multiple developers:
 ---
 
 ## Notes
+
+- Constitution override: replace any sample automated-test task above with a manual CLI run and
+  review of SQLite state and XLSX output. Do not generate automated test tasks.
+- Before adding custom implementation work, record the shorter applicable standard-library,
+  existing-dependency or focused-library alternative and why it was rejected.
 
 - [P] tasks = different files, no dependencies
 - [Story] label maps task to specific user story for traceability

@@ -1,4 +1,19 @@
 <!--
+Sync Impact Report (Amendment)
+- Version change: 1.3.1 -> 1.4.0 (MINOR -- a new mandatory rule for adopting simpler
+  existing solutions was added)
+- Modified principles: I. Simplicity First -- before writing a custom implementation,
+  developers MUST consider the standard library, an existing project dependency, or a mature
+  focused dependency; when it meets the requirement and produces less code, it MUST be used
+- Added/removed sections: none
+- Templates checked: ✅ .specify/templates/plan-template.md and
+  .specify/templates/tasks-template.md updated to require manual verification and record the
+  simpler existing alternative; ✅ .specify/templates/spec-template.md remains compatible
+- Runtime guidance: ✅ README.md updated to remove the obsolete VK reference
+- Follow-up TODOs: none
+-->
+
+<!--
 Sync Impact Report
 - Version change: (template) → 1.0.0
 - Ratification: first constitution for this project — no prior version existed
@@ -108,6 +123,12 @@ need (including Airflow, Kubernetes, microservices, or a second database) may be
 remaining added complexity MUST be justified against a simpler alternative in the plan's Complexity
 Tracking table.
 
+Before writing custom code for a general problem, developers MUST evaluate the Python standard
+library, an existing project dependency, and a mature focused dependency. If one meets the stated
+requirements and constraints with fewer lines of project code, it MUST be used. A custom solution
+is allowed only when the existing option fails a concrete requirement or adds more total complexity;
+the rejected option and reason MUST be recorded in the plan's Complexity Tracking table.
+
 ### II. Batch CLI, Not a Service
 
 This is a console command, not a web app or a service. There is no UI, no dashboard, and
@@ -204,4 +225,4 @@ file. This project currently has one maintainer, so review is self-review — bu
 task that violates a principle here MUST NOT proceed without either documenting the
 violation in the plan's Complexity Tracking table or amending this constitution first.
 
-**Version**: 1.3.1 | **Ratified**: 2026-07-10 | **Last Amended**: 2026-07-14
+**Version**: 1.4.0 | **Ratified**: 2026-07-10 | **Last Amended**: 2026-07-15
