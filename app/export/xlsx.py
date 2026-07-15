@@ -23,12 +23,10 @@ SITE_COLUMNS = [
   "match_status",
   "needs_review",
   "university",
-  "department",
   "post",
   "degree",
   "academic_title",
   "disciplines",
-  "gen_experience",
   "spec_experience",
   "email",
   "phone",
@@ -41,12 +39,10 @@ SITE_HEADERS = [
   "Где найден кандидат",
   "Требует проверки",
   "Университет",
-  "Кафедра",
   "Должность",
   "Учёная степень",
   "Учёное звание",
   "Преподаваемые дисциплины",
-  "Общий стаж, лет",
   "Стаж по специальности, лет",
   "Электронная почта",
   "Телефон",
@@ -149,6 +145,13 @@ def _latest_defense(defenses_json: str | None) -> dict[str, Any]:
   return max(items, key=lambda d: d.get("date") or "")
 
 
+def _format_duration(started_at: str, finished_at: str) -> str:
+  seconds = max(0, int((datetime.fromisoformat(finished_at) - datetime.fromisoformat(started_at)).total_seconds()))
+  hours, seconds = divmod(seconds, 3600)
+  minutes, seconds = divmod(seconds, 60)
+  return f"{hours:02}:{minutes:02}:{seconds:02}"
+
+
 def _match_status_label(status: str) -> str:
   return MATCH_STATUS_LABELS.get(status, status)
 
@@ -214,12 +217,10 @@ def export_xlsx(repo: Repository, output_path: Path) -> Path:
           _match_status_label(status),
           _yes_no(row["needs_review"]),
           uni["official_name"] if uni else "",
-          row["department_id"] or "",
           row["post"] or "",
           row["degree"] or "",
           row["academic_title"] or "",
           "; ".join(disciplines),
-          row["gen_experience"] if row["gen_experience"] is not None else "",
           row["spec_experience"] if row["spec_experience"] is not None else "",
           row["email"] or "",
           row["phone"] or "",
@@ -301,6 +302,7 @@ def export_xlsx(repo: Repository, output_path: Path) -> Path:
       "ID запуска",
       "Начало",
       "Окончание",
+      "Длительность",
       "Вузов обработано успешно",
       "Вузов с ошибками",
       "Всего кандидатов",
@@ -313,6 +315,7 @@ def export_xlsx(repo: Repository, output_path: Path) -> Path:
   )
   run = repo.execute("SELECT * FROM runs ORDER BY run_id DESC LIMIT 1").fetchone()
   if run:
+    finished_at = run["finished_at"] or datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     ok = repo.execute(
       "SELECT COUNT(*) AS c FROM universities WHERE layer1_status = 'ok'"
     ).fetchone()["c"]
@@ -331,7 +334,8 @@ def export_xlsx(repo: Repository, output_path: Path) -> Path:
       [
         run["run_id"],
         run["started_at"],
-        run["finished_at"] or "",
+        finished_at,
+        _format_duration(run["started_at"], finished_at),
         ok,
         err,
         total,
