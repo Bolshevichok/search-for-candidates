@@ -1,0 +1,24 @@
+# Configuration for Layer 2 enabled pipeline
+# Copy to config.yaml and adjust as needed
+
+run:
+  layer1: true
+  vak: true
+  match: true
+  layer2: true      # ← Enable Layer 2 here
+  vk: false
+
+limits:
+  # Layer 1 settings
+  request_delay_sec: 1.5
+  max_universities: null
+  layer1_workers: 4
+
+  # VAK settings
+  vak_request_delay_sec: 0.0
+  vak_max_pages: null
+  vak_detail_workers: 8
+
+  # Layer 2 settings (new)
+  layer2_workers: 6                  # Parallel workers for contact search
+  layer2_request_delay_sec: 2.0      # Delay between requests (seconds)

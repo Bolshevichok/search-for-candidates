@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS possible_namesakes (
 CREATE TABLE IF NOT EXISTS run_steps (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id INTEGER NOT NULL REFERENCES runs(run_id),
-    step TEXT NOT NULL CHECK (step IN ('layer1', 'vak', 'match', 'export')),
+    step TEXT NOT NULL CHECK (step IN ('layer1', 'vak', 'match', 'layer2', 'export')),
     university_id INTEGER REFERENCES universities(university_id),
     status TEXT NOT NULL CHECK (status IN ('pending', 'done', 'error')),
     university_site_hash TEXT,

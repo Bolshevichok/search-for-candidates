@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +34,10 @@ class Limits:
   layer1_workers: int = 4
   vak_request_delay_sec: float = 0.0
   vak_detail_workers: int = 8
+  layer2_workers: int = 2
+  layer2_request_delay_sec: float = 2.0
+  layer2_limit: int = 100
+  layer2_blocked_domain_keywords: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -43,10 +47,7 @@ class AppConfig:
   config_path: Path
 
   def validate_implemented_steps(self) -> None:
-    if self.run.layer2:
-      raise StepNotImplementedError(
-        "NotImplementedError: layer2 step is not implemented in this build"
-      )
+    return
 
 
 def load_config(config_path: Path | str = "config.yaml") -> AppConfig:
@@ -74,6 +75,10 @@ def load_config(config_path: Path | str = "config.yaml") -> AppConfig:
       layer1_workers=int(limits_raw.get("layer1_workers", 4)),
       vak_request_delay_sec=float(limits_raw.get("vak_request_delay_sec", 0.0)),
       vak_detail_workers=int(limits_raw.get("vak_detail_workers", 8)),
+      layer2_workers=int(limits_raw.get("layer2_workers", 2)),
+      layer2_request_delay_sec=float(limits_raw.get("layer2_request_delay_sec", 2.0)),
+      layer2_limit=int(limits_raw.get("layer2_limit", 100)),
+      layer2_blocked_domain_keywords=list(limits_raw.get("layer2_blocked_domain_keywords", [])),
     ),
     config_path=path,
   )
