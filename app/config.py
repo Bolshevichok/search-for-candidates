@@ -24,7 +24,6 @@ class RunFlags:
   vak: bool = True
   match: bool = True
   layer2: bool = False
-  vk: bool = False
 
 
 @dataclass
@@ -44,9 +43,9 @@ class AppConfig:
   config_path: Path
 
   def validate_implemented_steps(self) -> None:
-    if self.run.layer2 or self.run.vk:
+    if self.run.layer2:
       raise StepNotImplementedError(
-        "NotImplementedError: layer2/vk step is not implemented in this build"
+        "NotImplementedError: layer2 step is not implemented in this build"
       )
 
 
@@ -67,7 +66,6 @@ def load_config(config_path: Path | str = "config.yaml") -> AppConfig:
       vak=bool(run_raw.get("vak", True)),
       match=bool(run_raw.get("match", True)),
       layer2=bool(run_raw.get("layer2", False)),
-      vk=bool(run_raw.get("vk", False)),
     ),
     limits=Limits(
       request_delay_sec=float(limits_raw.get("request_delay_sec", 1.5)),

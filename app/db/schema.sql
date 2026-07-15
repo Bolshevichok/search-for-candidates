@@ -9,7 +9,6 @@ CREATE TABLE IF NOT EXISTS universities (
     domain TEXT UNIQUE,
     region TEXT,
     accreditation_status TEXT,
-    vk_group_id TEXT,
     is_pilot INTEGER NOT NULL DEFAULT 0,
     layer1_status TEXT
 );
@@ -88,9 +87,6 @@ CREATE TABLE IF NOT EXISTS candidates (
     phone TEXT,
     contact_type TEXT,
     contact_source_url TEXT,
-    vk_url TEXT,
-    vk_score REAL,
-    vk_status TEXT,
     candidate_content_hash TEXT NOT NULL,
     first_seen_run_id INTEGER NOT NULL REFERENCES runs(run_id),
     last_seen_run_id INTEGER NOT NULL REFERENCES runs(run_id)

@@ -44,6 +44,7 @@ class Repository:
     self._migrate_vak_raw()
     self._migrate_employees_raw()
     self._migrate_candidates()
+    self._remove_vk_columns()
     self.conn.commit()
 
   def _migrate_employees_raw(self) -> None:
@@ -68,6 +69,17 @@ class Repository:
     ):
       if col not in existing:
         self.execute(f"ALTER TABLE candidates ADD COLUMN {col} {col_type}")
+
+  def _remove_vk_columns(self) -> None:
+    """Remove obsolete VK data from databases created by older versions."""
+    for table, columns in (
+      ("universities", ("vk_group_id",)),
+      ("candidates", ("vk_url", "vk_score", "vk_status")),
+    ):
+      existing = {row["name"] for row in self.execute(f"PRAGMA table_info({table})")}
+      for column in columns:
+        if column in existing:
+          self.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
 
   def _migrate_vak_raw(self) -> None:
     existing = {row["name"] for row in self.execute("PRAGMA table_info(vak_raw)")}
@@ -173,7 +185,6 @@ class Repository:
     domain: str | None,
     region: str | None,
     accreditation_status: str | None,
-    vk_group_id: str | None,
     is_pilot: bool,
   ) -> int:
     aliases_json = json.dumps(aliases or [], ensure_ascii=False)
@@ -183,8 +194,7 @@ class Repository:
       self.execute(
         """
         UPDATE universities SET
-          official_name = ?, aliases = ?, region = ?, accreditation_status = ?,
-          vk_group_id = ?, is_pilot = ?
+          official_name = ?, aliases = ?, region = ?, accreditation_status = ?, is_pilot = ?
         WHERE university_id = ?
         """,
         (
@@ -192,7 +202,6 @@ class Repository:
           aliases_json,
           region,
           accreditation_status,
-          vk_group_id,
           int(is_pilot),
           university_id,
         ),
@@ -201,8 +210,8 @@ class Repository:
       cur = self.execute(
         """
         INSERT INTO universities
-          (official_name, aliases, domain, region, accreditation_status, vk_group_id, is_pilot)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+          (official_name, aliases, domain, region, accreditation_status, is_pilot)
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
         (
           official_name,
@@ -210,7 +219,6 @@ class Repository:
           domain,
           region,
           accreditation_status,
-          vk_group_id,
           int(is_pilot),
         ),
       )
@@ -371,10 +379,9 @@ class Repository:
         candidate_id, full_name, identity_key, match_status, needs_review,
         university_id, department_id, post, degree, academic_title, disciplines,
         gen_experience, spec_experience, source_url, defenses,
-        email, phone, contact_type, contact_source_url,
-        vk_url, vk_score, vk_status, candidate_content_hash,
+        email, phone, contact_type, contact_source_url, candidate_content_hash,
         first_seen_run_id, last_seen_run_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?)
       ON CONFLICT(candidate_id) DO UPDATE SET
         full_name = excluded.full_name,
         identity_key = excluded.identity_key,

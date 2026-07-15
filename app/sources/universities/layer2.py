@@ -20,5 +20,4 @@ Output contract (merged back into candidates by candidate_id):
     }
 
 Full mechanics: candidate-pipeline-architecture.md §6.
-Stub contract: specs/001-core-pipeline-mvp/contracts/future-layer2-vk-stub-contract.md
 """

@@ -3,7 +3,6 @@ run:
   vak: true
   match: true
   layer2: false
-  vk: false
 
 limits:
   request_delay_sec: 1.5
