@@ -16,7 +16,7 @@ registry CSV
            export → site_employees + vak_candidates (+ errors, meta)
 ```
 
-Layer2 contacts are not implemented yet (`run.layer2` must stay `false` in this build).
+Layer 2 contacts run separately: `python -m app step layer2 --limit 100`.
 
 ## Setup
 
@@ -31,7 +31,6 @@ copy .env.example .env
 
 ```bash
 python -m app run
-python -m app run --full
 python -m app step layer1
 python -m app step vak
 python -m app step match
@@ -44,7 +43,7 @@ Configuration: `config.yaml`. Smoke: `config.smoke5.yaml` (5 universities, 15 VA
 
 ```bash
 python -m app reset
-python -m app --config config.smoke5.yaml run --out output/smoke5.xlsx --full
+python -m app --config config.smoke5.yaml run --out output/smoke5.xlsx
 ```
 
 Pass config before the subcommand: `python -m app --config config.yaml run`.

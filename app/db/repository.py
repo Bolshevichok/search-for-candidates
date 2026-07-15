@@ -46,10 +46,10 @@ class Repository:
   def commit(self) -> None:
     self.conn.commit()
 
-  def create_run(self, is_full: bool = False) -> int:
+  def create_run(self) -> int:
     cur = self.execute(
-      "INSERT INTO runs (started_at, status, is_full) VALUES (?, 'running', ?)",
-      (utc_now_iso(), int(is_full)),
+      "INSERT INTO runs (started_at, status) VALUES (?, 'running')",
+      (utc_now_iso(),),
     )
     self.commit()
     return int(cur.lastrowid)
@@ -135,11 +135,20 @@ class Repository:
     self.commit()
     return university_id
 
-  def list_universities(self, limit: int | None = None) -> list[sqlite3.Row]:
-    sql = "SELECT * FROM universities ORDER BY university_id"
+  def list_universities(
+    self,
+    limit: int | None = None,
+    domain: str | None = None,
+  ) -> list[sqlite3.Row]:
+    sql = "SELECT * FROM universities"
+    params: list[Any] = []
+    if domain is not None:
+      sql += " WHERE domain = ?"
+      params.append(domain)
+    sql += " ORDER BY university_id"
     if limit is not None:
       sql += f" LIMIT {int(limit)}"
-    return list(self.execute(sql).fetchall())
+    return list(self.execute(sql, params).fetchall())
 
   def set_university_layer1_status(self, university_id: int, status: str) -> None:
     self.execute(
@@ -285,17 +294,16 @@ class Repository:
     self.execute(
       """
       INSERT INTO candidates (
-        candidate_id, full_name, identity_key, match_status, needs_review,
+        candidate_id, full_name, identity_key, match_status,
         university_id, department_id, post, degree, academic_title, disciplines,
         gen_experience, spec_experience, source_url, defenses,
         email, phone, contact_type, contact_source_url, candidate_content_hash,
         first_seen_run_id, last_seen_run_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?)
       ON CONFLICT(candidate_id) DO UPDATE SET
         full_name = excluded.full_name,
         identity_key = excluded.identity_key,
         match_status = excluded.match_status,
-        needs_review = excluded.needs_review,
         university_id = excluded.university_id,
         department_id = excluded.department_id,
         post = excluded.post,
@@ -314,7 +322,6 @@ class Repository:
         record["full_name"],
         record.get("identity_key"),
         record["match_status"],
-        int(record.get("needs_review", False)),
         record.get("university_id"),
         record.get("department_id"),
         record.get("post"),
@@ -344,10 +351,6 @@ class Repository:
       VALUES (?, ?, ?)
       """,
       (site_candidate_id, vak_candidate_id, reason),
-    )
-    self.execute(
-      "UPDATE candidates SET needs_review = 1 WHERE candidate_id IN (?, ?)",
-      (site_candidate_id, vak_candidate_id),
     )
     self.commit()
 

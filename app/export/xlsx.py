@@ -21,7 +21,6 @@ VAK_STATUSES = frozenset({"vak_no_site", "site_and_vak", "site_and_vak_probable"
 SITE_COLUMNS = [
   "full_name",
   "match_status",
-  "needs_review",
   "university",
   "post",
   "degree",
@@ -37,7 +36,6 @@ SITE_COLUMNS = [
 SITE_HEADERS = [
   "ФИО",
   "Где найден кандидат",
-  "Требует проверки",
   "Университет",
   "Должность",
   "Учёная степень",
@@ -53,7 +51,6 @@ SITE_HEADERS = [
 VAK_COLUMNS = [
   "full_name",
   "match_status",
-  "needs_review",
   "branch",
   "specialty_code",
   "specialty_name",
@@ -70,7 +67,6 @@ VAK_COLUMNS = [
 VAK_HEADERS = [
   "ФИО",
   "Где найден кандидат",
-  "Требует проверки",
   "Отрасль науки",
   "Код специальности",
   "Название специальности",
@@ -156,10 +152,6 @@ def _match_status_label(status: str) -> str:
   return MATCH_STATUS_LABELS.get(status, status)
 
 
-def _yes_no(value: Any) -> str:
-  return "Да" if value else "Нет"
-
-
 def _degree_award_process(value: Any) -> str:
   if value:
     return "Самостоятельное присуждение степени вузом"
@@ -222,7 +214,6 @@ def export_xlsx(repo: Repository, output_path: Path, domain: str | None = None) 
         [
           row["full_name"],
           _match_status_label(status),
-          _yes_no(row["needs_review"]),
           uni["official_name"] if uni else "",
           row["post"] or "",
           row["degree"] or "",
@@ -241,7 +232,6 @@ def export_xlsx(repo: Repository, output_path: Path, domain: str | None = None) 
         [
           row["full_name"],
           _match_status_label(status),
-          _yes_no(row["needs_review"]),
           vak_fields["branch"],
           vak_fields["specialty_code"],
           vak_fields["specialty_name"],
@@ -317,7 +307,6 @@ def export_xlsx(repo: Repository, output_path: Path, domain: str | None = None) 
       "Вероятно есть на сайте и в ВАК",
       "Есть в ВАК, нет на сайте",
       "Есть на сайте, нет в ВАК",
-      "Полный запуск",
     ]
   )
   run = repo.execute("SELECT * FROM runs ORDER BY run_id DESC LIMIT 1").fetchone()
@@ -350,7 +339,6 @@ def export_xlsx(repo: Repository, output_path: Path, domain: str | None = None) 
         counts.get("site_and_vak_probable", 0),
         counts.get("vak_no_site", 0),
         counts.get("site_no_vak", 0),
-        bool(run["is_full"]),
       ]
     )
 

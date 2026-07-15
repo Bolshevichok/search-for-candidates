@@ -17,8 +17,7 @@ CREATE TABLE IF NOT EXISTS runs (
     run_id INTEGER PRIMARY KEY AUTOINCREMENT,
     started_at TEXT NOT NULL,
     finished_at TEXT,
-    status TEXT NOT NULL CHECK (status IN ('running', 'success', 'failed')),
-    is_full INTEGER NOT NULL DEFAULT 0
+    status TEXT NOT NULL CHECK (status IN ('running', 'success', 'failed'))
 );
 
 CREATE TABLE IF NOT EXISTS employees_raw (
@@ -72,7 +71,6 @@ CREATE TABLE IF NOT EXISTS candidates (
             'site_no_vak'
         )
     ),
-    needs_review INTEGER NOT NULL DEFAULT 0,
     university_id INTEGER REFERENCES universities(university_id),
     department_id TEXT,
     post TEXT,
