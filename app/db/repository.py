@@ -1,9 +1,8 @@
-"""SQLite persistence, checkpoints, and backup helpers."""
+"""SQLite persistence and minimal run checkpoints."""
 
 from __future__ import annotations
 
 import json
-import shutil
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,8 +10,6 @@ from typing import Any
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 DEFAULT_DB_PATH = Path("data/state.sqlite")
-DEFAULT_BACKUP_DIR = Path("data/backups")
-MAX_BACKUPS = 5
 
 
 def utc_now_iso() -> str:
@@ -71,63 +68,23 @@ class Repository:
     ).fetchone()
     return int(row["run_id"]) if row else None
 
-  def mark_step_done(
-    self,
-    run_id: int,
-    step: str,
-    university_id: int | None = None,
-    *,
-    university_site_hash: str | None = None,
-    checkpoint_cursor: int | None = None,
-  ) -> None:
+  def mark_university_processed(self, run_id: int, university_id: int) -> None:
     self.execute(
       """
-      INSERT INTO run_steps (run_id, step, university_id, status, university_site_hash, checkpoint_cursor)
-      VALUES (?, ?, ?, 'done', ?, ?)
-      ON CONFLICT(run_id, step, university_id) DO UPDATE SET
-        status = 'done',
-        university_site_hash = COALESCE(excluded.university_site_hash, run_steps.university_site_hash),
-        checkpoint_cursor = COALESCE(excluded.checkpoint_cursor, run_steps.checkpoint_cursor),
-        error_message = NULL
+      INSERT INTO processed_universities (run_id, university_id, completed_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(run_id, university_id) DO UPDATE SET completed_at = excluded.completed_at
       """,
-      (run_id, step, university_id, university_site_hash, checkpoint_cursor),
+      (run_id, university_id, utc_now_iso()),
     )
     self.commit()
 
-  def mark_step_error(
-    self,
-    run_id: int,
-    step: str,
-    university_id: int | None,
-    message: str,
-  ) -> None:
-    self.execute(
-      """
-      INSERT INTO run_steps (run_id, step, university_id, status, error_message)
-      VALUES (?, ?, ?, 'error', ?)
-      ON CONFLICT(run_id, step, university_id) DO UPDATE SET
-        status = 'error',
-        error_message = excluded.error_message
-      """,
-      (run_id, step, university_id, message),
-    )
-    self.commit()
-
-  def get_done_university_ids(self, run_id: int, step: str = "layer1") -> set[int]:
+  def get_processed_university_ids(self, run_id: int) -> set[int]:
     rows = self.execute(
-      "SELECT university_id FROM run_steps WHERE run_id = ? AND step = ? AND status = 'done' "
-      "AND university_id IS NOT NULL",
-      (run_id, step),
+      "SELECT university_id FROM processed_universities WHERE run_id = ?",
+      (run_id,),
     ).fetchall()
     return {int(r["university_id"]) for r in rows}
-
-  def get_vak_checkpoint(self, run_id: int) -> int:
-    row = self.execute(
-      "SELECT checkpoint_cursor FROM run_steps WHERE run_id = ? AND step = 'vak' "
-      "AND university_id IS NULL AND status = 'done' ORDER BY id DESC LIMIT 1",
-      (run_id,),
-    ).fetchone()
-    return int(row["checkpoint_cursor"]) if row and row["checkpoint_cursor"] is not None else 0
 
   def upsert_university(
     self,
@@ -402,7 +359,7 @@ class Repository:
     for table in (
       "possible_namesakes",
       "university_errors",
-      "run_steps",
+      "processed_universities",
       "candidates",
       "employees_raw",
       "vak_raw",
@@ -418,24 +375,3 @@ def open_repository(db_path: Path | str = DEFAULT_DB_PATH, init: bool = True) ->
   if init:
     repo.init_schema()
   return repo
-
-
-def backup_state(
-  reason: str,
-  *,
-  db_path: Path | str = DEFAULT_DB_PATH,
-  backup_dir: Path | str = DEFAULT_BACKUP_DIR,
-  max_backups: int = MAX_BACKUPS,
-) -> Path | None:
-  src = Path(db_path)
-  if not src.exists():
-    return None
-  dest_dir = Path(backup_dir)
-  dest_dir.mkdir(parents=True, exist_ok=True)
-  stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-  dest = dest_dir / f"state_{reason}_{stamp}.sqlite"
-  shutil.copy2(src, dest)
-  backups = sorted(dest_dir.glob("state_*.sqlite"), key=lambda p: p.stat().st_mtime, reverse=True)
-  for old in backups[max_backups:]:
-    old.unlink(missing_ok=True)
-  return dest

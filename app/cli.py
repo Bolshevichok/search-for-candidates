@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from app.config import StepNotImplementedError, load_config
-from app.db.repository import DEFAULT_DB_PATH, backup_state, open_repository
+from app.db.repository import DEFAULT_DB_PATH, open_repository
 from app.export.xlsx import default_output_path, export_xlsx
 from app.matching.matcher import run_match
 from app.pipeline.ingest import run_ingest
@@ -55,12 +55,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         domain=args.domain,
         limit=layer2_limit,
       )
-      repo.mark_step_done(run_id, "layer2", None)
     out = Path(args.out) if args.out else default_output_path()
     export_xlsx(repo, out, domain=args.domain)
-    repo.mark_step_done(run_id, "export", None)
     repo.finish_run(run_id, "success")
-    backup_state("post_run", db_path=args.db)
     print(f"Run {run_id} completed. Export: {out}")
   return 0
 
@@ -95,7 +92,6 @@ def cmd_step(args: argparse.Namespace) -> int:
         domain=args.domain,
         limit=args.limit if args.limit is not None else cfg.limits.layer2_limit,
       )
-      repo.mark_step_done(run_id, "layer2", None)
     elif args.step_name == "match":
       run_match(repo, run_id)
     print(f"Step {args.step_name} completed for run {run_id}.")
@@ -138,7 +134,6 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def cmd_reset(args: argparse.Namespace) -> int:
-  backup_state("reset", db_path=args.db)
   if Path(args.db).exists():
     with open_repository(args.db) as repo:
       repo.reset_database()

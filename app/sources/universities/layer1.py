@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -146,13 +145,6 @@ def parse_teaching_staff(html: str, source_url: str) -> list[dict[str, Any]]:
   return records
 
 
-def compute_site_hash(*parts: str) -> str:
-  digest = hashlib.sha256()
-  for part in parts:
-    digest.update(part.encode("utf-8", errors="ignore"))
-  return digest.hexdigest()
-
-
 @dataclass
 class Layer1Runner:
   repo: Repository
@@ -168,7 +160,7 @@ class Layer1Runner:
       self.repo.record_university_error(
         self.run_id, university_id, "unresolved_domain", "No domain in registry"
       )
-      self.repo.mark_step_done(self.run_id, "layer1", university_id)
+      self.repo.mark_university_processed(self.run_id, university_id)
       return
 
     index_url = f"https://{domain}{_EMPLOYEES_PATH}"
@@ -181,10 +173,9 @@ class Layer1Runner:
         "unreachable",
         f"HTTP {response.status_code} for {index_url}",
       )
-      self.repo.mark_step_done(self.run_id, "layer1", university_id)
+      self.repo.mark_university_processed(self.run_id, university_id)
       return
 
-    raw_parts = [response.text]
     program_links = extract_program_links(response.text, index_url)
     if not program_links:
       program_links = []
@@ -194,7 +185,6 @@ class Layer1Runner:
       page = self.client.get(link)
       if page.status_code != 200:
         continue
-      raw_parts.append(page.text)
       parsed.extend(parse_teaching_staff(page.text, link))
 
     if not parsed:
@@ -230,13 +220,18 @@ class Layer1Runner:
         self.repo.upsert_employee(record)
       self.repo.set_university_layer1_status(university_id, "ok")
 
-    site_hash = compute_site_hash(*raw_parts)
-    self.repo.mark_step_done(
-      self.run_id,
-      "layer1",
-      university_id,
-      university_site_hash=site_hash,
-    )
+    self.repo.mark_university_processed(self.run_id, university_id)
+
+
+def _record_university_failure(
+  repo: Repository,
+  run_id: int,
+  university_id: int,
+  error: Exception,
+) -> None:
+  message = str(error)
+  repo.set_university_layer1_status(university_id, "unreachable")
+  repo.record_university_error(run_id, university_id, "unreachable", message)
 
 
 def _run_one_university(
@@ -254,9 +249,7 @@ def _run_one_university(
         runner.process_university(uni)
   except Exception as exc:  # noqa: BLE001
     with open_repository(db_path, init=False) as repo:
-      repo.set_university_layer1_status(university_id, "unreachable")
-      repo.record_university_error(run_id, university_id, "unreachable", str(exc))
-      repo.mark_step_error(run_id, "layer1", university_id, str(exc))
+      _record_university_failure(repo, run_id, university_id, exc)
 
 
 def run_layer1(
@@ -269,7 +262,7 @@ def run_layer1(
   domain: str | None = None,
 ) -> None:
   with open_repository(db_path, init=False) as repo:
-    done = repo.get_done_university_ids(run_id, "layer1")
+    done = repo.get_processed_university_ids(run_id)
     universities = [
       uni
       for uni in repo.list_universities(limit=max_universities, domain=domain)
@@ -286,19 +279,10 @@ def run_layer1(
         runner = Layer1Runner(repo=repo, client=client, resolver=resolver, run_id=run_id)
         for uni in universities:
           university_id = int(uni["university_id"])
-          if not uni["domain"]:
-            repo.set_university_layer1_status(university_id, "unresolved_domain")
-            repo.record_university_error(
-              run_id, university_id, "unresolved_domain", "No domain in registry"
-            )
-            repo.mark_step_done(run_id, "layer1", university_id)
-            continue
           try:
             runner.process_university(uni)
           except Exception as exc:  # noqa: BLE001
-            repo.set_university_layer1_status(university_id, "unreachable")
-            repo.record_university_error(run_id, university_id, "unreachable", str(exc))
-            repo.mark_step_error(run_id, "layer1", university_id, str(exc))
+            _record_university_failure(repo, run_id, university_id, exc)
     return
 
   pool_workers = min(workers, len(universities))

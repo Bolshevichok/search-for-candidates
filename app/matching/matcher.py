@@ -1,5 +1,4 @@
 """Match layer1 employees with VAK records (4 statuses + possible_namesakes)."""
-
 from __future__ import annotations
 
 import hashlib
@@ -243,5 +242,3 @@ def run_match(repo: Repository, run_id: int) -> None:
       },
     )
     seq += 1
-
-  repo.mark_step_done(run_id, "match", None)
