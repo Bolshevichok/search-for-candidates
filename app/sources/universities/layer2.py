@@ -9,10 +9,10 @@ import json
 import logging
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import unquote, urljoin, urlparse
 
 from selectolax.parser import HTMLParser
 
@@ -28,12 +28,11 @@ try:
 except ImportError:
     OPENAI_AVAILABLE = False
 
-from app.db.repository import Repository, open_repository
+from app.db.repository import open_repository
 from app.matching.normalize import normalize_fio, split_fio_parts
 from app.sources.http_client import HttpClient
 
 _LOGGER = logging.getLogger(__name__)
-_EMPLOYEES_PATH = "/sveden/employees"
 
 _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 _PHONE_RE = re.compile(
@@ -41,53 +40,69 @@ _PHONE_RE = re.compile(
     r"|\+\d{1,3}[\s\-]?\d{7,14}"
 )
 
-_MAX_FALLBACK_PAGES=300
-
-# Добавь в начало файла, рядом с другими константами
-_ALPHABET_KEYWORDS = (
-    "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м",
-    "н", "о", "п", "р", "с", "т", "у", "ф", "х", "ц", "ч", "ш", "щ", "ъ",
-    "ы", "ь", "э", "ю", "я", "А", "Б", "В", "Г", "Д", "Е", "Ё", "Ж", "З",
-    "И", "Й", "К", "Л", "М", "О", "П", "Р", "С", "Т", "У", "Ф", "Х", "Ц",
-    "Ч", "Ш", "Щ", "Ъ", "Ы", "Ь", "Э", "Ю", "Я", "a", "b", "c", "d", "e",
-    "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s",
-    "t", "u", "v", "w", "x", "y", "z", "A", "B", "C", "D", "E", "F", "G",
-    "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U",
-    "V", "W", "X", "Y", "Z"
+# Transliteration variants for scoring URLs that embed the person's surname
+# (personal pages like /staff/ivanov-i-i/). Two maps because
+# RU->EN transliteration is not standardized: х -> kh|h, й -> y|j, ц -> ts|c
+_TRANSLIT_MAPS = (
+    {"а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e",
+     "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m",
+     "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
+     "ф": "f", "х": "kh", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "shch",
+     "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu", "я": "ya"},
+    {"а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e",
+     "ж": "j", "з": "z", "и": "i", "й": "j", "к": "k", "л": "l", "м": "m",
+     "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
+     "ф": "f", "х": "h", "ц": "c", "ч": "ch", "ш": "sh", "щ": "sch",
+     "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu", "я": "ya"},
 )
+
+
+def _surname_translit_variants(last_name: str) -> tuple[str, ...]:
+    last = last_name.lower().strip()
+    if not last:
+        return ()
+    variants = {
+        "".join(m.get(ch, ch) for ch in last) for m in _TRANSLIT_MAPS
+    }
+    return tuple(v for v in variants if len(v) >= 3)
+
+
+_SKIP_EXTENSIONS = (
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".zip", ".rar",
+    ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp", ".ico",
+    ".mp4", ".mp3", ".avi", ".css", ".js", ".woff", ".woff2", ".ttf",
+)
+
+# Слова-стопы: если что-то из этого встречается в URL (хост, путь или query),
+# ссылка не скачивается и вглубь по ней не идём -- это разделы, где контактов
+# сотрудников не бывает (новости, афиша, медиа, абитуриентам, личные кабинеты...).
+# Список легко пополнять.
+_BLOCKED_URL_KEYWORDS = (
+    # новости / события / пресса
+    "news", "novost", "press", "media",
+    "event", "sobyti", "anons", "afisha", "calendar", "kalendar",
+    # медиатека
+    "gallery", "galere", "photo", "foto", "video",
+    # блоги / форумы / архивы
+    "blog", "forum", "arhiv", "archive",
+    # абитуриентам / приёмная кампания
+    "abitur", "priem", "admission", "postuplen",
+    # служебное: авторизация, корзины, трекинг
+    "login", "signin", "signup", "logout", "authoriz", "avtoriz", "register",
+    "basket", "cart", "bitrix", "captcha",
+    # версии для печати / RSS / карты сайта
+    "print=", "rss", "sitemap", "sveden"
+)
+
+
+def _url_blocked(url: str, blocked: tuple[str, ...]) -> bool:
+    low = unquote(url).lower()
+    return any(word in low for word in blocked)
+
 
 def _clean_text(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
-def _is_alphabet_link(text: str, href: str) -> bool:
-    """Простая эвристика: короткий текст из 1-2 русских букв или ссылка с ?letter= / /a / /b и т.д."""
-    text_clean = _clean_text(text).lower().strip()
-    if len(text_clean) <= 2 and any(c in text_clean for c in _ALPHABET_KEYWORDS):
-        return True
-    href_l = href.lower()
-    return any(p in href_l for p in ("?letter=", "&letter=", "/a/", "/b/", "/letter/"))
-
-
-def _score_internal_link_enhanced(
-    href: str, text: str, target_initial: str | None = None, boost_alphabet: bool = False
-) -> int:
-    """Улучшенный скоринг."""
-    score = _score_internal_link(href, text)
-
-    if _is_alphabet_link(text, href):
-        if target_initial and target_initial.lower() in _clean_text(text).lower():
-            score += 8
-        else:
-            score += 4 if boost_alphabet else 2
-
-    return score
-
-_NAME_INDICATORS = re.compile(r'[А-ЯЁ][а-яё]{2,}\s+[А-ЯЁ][а-яё]', re.IGNORECASE)
-
-def _page_has_any_names(html: str) -> bool:
-    """Быстрая проверка наличия человеческих имён на странице."""
-    text = _html_to_text(html)[:10000]  # не весь текст
-    return bool(_NAME_INDICATORS.search(text))
 
 @dataclass
 class Layer2Contract:
@@ -123,14 +138,6 @@ def _html_to_text(value: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _itemprop_text(block: Any, name: str) -> str | None:
-    node = block.css_first(f'[itemprop="{name}"]')
-    if not node:
-        return None
-    text = _clean_text(node.text(separator=" "))
-    return text or None
-
-
 _BLOCK_SELECTORS = ("tr", "li", "article", "dd")
 _MAX_SNIPPET_CHARS = 6000
 
@@ -157,270 +164,53 @@ def _find_person_html_snippet(html: str, pattern: re.Pattern[str]) -> str | None
     return None
 
 
+_PERSONAL_PAGE_SELECTORS = ("title", "h1", "h2", "h3")
+_MAX_PERSONAL_PAGE_CHARS = 20000
+
+
+def _is_personal_page(html: str, pattern: re.Pattern[str]) -> bool:
+    """A page whose title/heading IS the person's name is their personal
+    card -- the whole page is about them, so contacts anywhere on it
+    (sidebar, table far below the header) belong to them."""
+    tree = HTMLParser(html)
+    for selector in _PERSONAL_PAGE_SELECTORS:
+        for node in tree.css(selector):
+            if pattern.search(_clean_text(node.text(separator=" "))):
+                return True
+    return False
+
+
 def _relevant_content_for_name(html: str, full_name: str) -> str:
     """Best-effort scoped content around this person, for both the regex
-    fallback and the LLM prompt: the smallest per-person block if one can
-    be found, else a text window centered on the name match, else the head
-    of the cleaned, tag-stripped page text."""
+    fallback and the LLM prompt: the whole page if it's the person's own
+    card (name in title/h1 -- contacts can sit far from the name), else the
+    smallest per-person block, else a text window centered on the name
+    match, else the head of the cleaned, tag-stripped page text."""
     target_last, target_first, target_patr = split_fio_parts(full_name)
     pattern = _build_loose_name_pattern(target_last, target_first, target_patr, strict=True)
     if pattern:
+        if _is_personal_page(html, pattern):
+            return _html_to_text(html)[:_MAX_PERSONAL_PAGE_CHARS]
         snippet = _find_person_html_snippet(html, pattern)
         if snippet:
             return snippet
         plain_text = _html_to_text(html)
         match = pattern.search(plain_text)
         if match:
-            start = max(0, match.start() - 1000)
-            end = min(len(plain_text), match.end() + 1000)
+            start = max(0, match.start() - 2000)
+            end = min(len(plain_text), match.end() + 2000)
             return plain_text[start:end]
     return _html_to_text(html)[:4000]
 
 
 # ---------------------------------------------------------------------------
-# Strict /sveden/employees path (no Crawl4AI, no LLM)
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class EmployeeRecord:
-    """One person's block on /sveden/employees, scoped so contacts can never
-    leak from a neighbouring person's row/card."""
-
-    fio: str
-    fio_normalized: str
-    post: str | None
-    email: str | None
-    phone: str | None
-    source_url: str
-
-
-def _scoped_contact(block: Any, itemprop_name: str, pattern: re.Pattern[str]) -> str | None:
-    """Look for a contact value ONLY inside this person's own markup block.
-
-    Preference order: explicit itemprop (rare but some universities add it),
-    then a regex match restricted to this block's own text -- never the full
-    page text, which is what let the old implementation pick up a contact
-    that actually belonged to a different row on the page.
-    """
-    explicit = _itemprop_text(block, itemprop_name)
-    if explicit:
-        match = pattern.search(explicit)
-        if match:
-            return match.group()
-        return explicit
-    block_text = _clean_text(block.text(separator=" "))
-    match = pattern.search(block_text)
-    return match.group() if match else None
-
-
-def parse_employees_directory(html: str, source_url: str) -> list[EmployeeRecord]:
-    """Parse /sveden/employees into per-person records using the same
-    itemprop microdata contract as layer1.parse_teaching_staff, scoped so
-    that email/phone extraction cannot cross person boundaries.
-    """
-    tree = HTMLParser(html)
-    blocks = tree.css('[itemprop="teachingStaff"]')
-    if not blocks:
-        blocks = tree.css("tr")
-
-    records: list[EmployeeRecord] = []
-    for block in blocks:
-        fio = _itemprop_text(block, "fio")
-        if not fio:
-            continue
-        records.append(
-            EmployeeRecord(
-                fio=fio,
-                fio_normalized=normalize_fio(fio),
-                post=_itemprop_text(block, "post"),
-                email=_scoped_contact(block, "email", _EMAIL_RE),
-                phone=_scoped_contact(block, "phone", _PHONE_RE),
-                source_url=source_url,
-            )
-        )
-    return records
-
-
-def fetch_employees_directory(domain: str, client: HttpClient) -> list[EmployeeRecord] | None:
-    """Fetch and parse /sveden/employees with a plain HTTP GET.
-
-    Kept for standalone/one-off use (e.g. tests, ad-hoc scripts). The
-    run_layer2 pipeline path does NOT call this -- layer1 already fetched
-    and parsed this exact page for every university, so layer2 reads that
-    result back from employees_raw instead (see
-    `load_employees_directory_from_db`) rather than downloading it again.
-    """
-    url = f"https://{domain}{_EMPLOYEES_PATH}"
-    try:
-        response = client.get(url)
-    except Exception as e:  # noqa: BLE001
-        _LOGGER.debug(f"Failed to fetch {url}: {e}")
-        return None
-    if response.status_code != 200:
-        return None
-    return parse_employees_directory(response.text, url)
-
-
-def check_employees_endpoint(domain: str, client: HttpClient) -> bool:
-    """Check if /sveden/employees endpoint exists and is parseable."""
-    return fetch_employees_directory(domain, client) is not None
-
-
-def load_employees_directory_from_db(
-    repo: Repository, university_id: int
-) -> list[EmployeeRecord] | None:
-    """Reuse layer1's already-fetched-and-parsed /sveden/employees rows for
-    this university instead of downloading and re-parsing the page again.
-
-    Returns None if layer1 never got a working /sveden/employees page for
-    this university (status other than 'ok') -- that's the signal for the
-    caller to fall back to the generic-site Crawl4AI+LLM path, same as when
-    the old HTTP fetch returned a 404/error. An empty list means layer1's
-    page was reachable and parsed but had no matching person rows -- that is
-    NOT the same as "missing", so it does not trigger the fallback path.
-    """
-    status = repo.get_university_layer1_status(university_id)
-    if status != "ok":
-        return None
-    rows = repo.get_employees_for_university(university_id)
-    return [
-        EmployeeRecord(
-            fio=row["fio"],
-            fio_normalized=row["fio_normalized"],
-            post=row.get("post"),
-            email=row.get("email"),
-            phone=row.get("phone"),
-            source_url=row["source_url"],
-        )
-        for row in rows
-    ]
-
-
-def _same_person(a_last: str, a_first: str, a_patr: str | None, full_name: str) -> bool:
-    b_last, b_first, b_patr = split_fio_parts(full_name)
-    return a_last == b_last and a_first == b_first and (a_patr or None) == (b_patr or None)
-
-
-def match_employee(
-    records: list[EmployeeRecord], full_name: str
-) -> tuple[EmployeeRecord | None, str]:
-    """Strictly match a candidate against parsed /sveden/employees records.
-
-    Returns (record_or_None, status) where status is one of:
-      'exact'      -- normalized FIO matched exactly, one record
-      'initials'   -- surname + first-initial (+ patronymic-initial if the
-                       candidate has one) matched exactly, one record
-      'ambiguous'  -- more than one record matches at the same strictness
-                       level; we refuse to guess which one is right
-      'not_found'  -- no record matches
-
-    Unlike the previous implementation, a surname-only or surname+first-
-    initial-only match is never accepted as sufficient on its own when the
-    candidate's full name includes a patronymic: two teachers can easily
-    share a surname and first initial, and guessing wrongly means writing
-    someone else's email into the database.
-    """
-    target_norm = normalize_fio(full_name)
-    target_last, target_first, target_patr = split_fio_parts(full_name)
-    if not target_last or not target_first:
-        return None, "not_found"
-
-    exact = [r for r in records if r.fio_normalized == target_norm]
-    if len(exact) == 1:
-        return exact[0], "exact"
-    if len(exact) > 1:
-        return None, "ambiguous"
-
-    initials_matches: list[EmployeeRecord] = []
-    for r in records:
-        r_last, r_first, r_patr = split_fio_parts(r.fio)
-        if r_last != target_last:
-            continue
-        if not r_first or r_first[0] != target_first[0]:
-            continue
-        if target_patr:
-            # Candidate FIO has a patronymic: require the site record to
-            # either match it by initial, or be silent about it. Two
-            # different explicit patronymics for the same surname+initial
-            # are two different people -- reject, do not guess.
-            if r_patr and r_patr[0] != target_patr[0]:
-                continue
-        initials_matches.append(r)
-
-    if len(initials_matches) == 1:
-        return initials_matches[0], "initials"
-    if len(initials_matches) > 1:
-        return None, "ambiguous"
-    return None, "not_found"
-
-
-def _domain_matches(email: str, domain: str) -> bool:
-    email_domain = email.rsplit("@", 1)[-1].lower()
-    domain = domain.lower()
-    return email_domain == domain or email_domain.endswith("." + domain)
-
-
-def contract_from_employees_match(
-    candidate_id: str,
-    full_name: str,
-    university_domain: str,
-    record: EmployeeRecord | None,
-    status: str,
-) -> Layer2Contract:
-    if status == "ambiguous":
-        return Layer2Contract(
-            candidate_id=candidate_id,
-            crawl_status="page_found",
-            contact_type="none",
-            confidence="low",
-            error_message="ambiguous_name_match_on_sveden_employees",
-        )
-    if status == "not_found" or record is None:
-        return Layer2Contract(
-            candidate_id=candidate_id,
-            crawl_status="page_found",
-            contact_type="none",
-            confidence="low",
-        )
-
-    if not record.email and not record.phone:
-        return Layer2Contract(
-            candidate_id=candidate_id,
-            crawl_status="page_found",
-            full_name=record.fio,
-            contact_type="none",
-            confidence="high" if status == "exact" else "medium",
-            source_url=record.source_url,
-        )
-
-    confidence = "high" if status == "exact" else "medium"
-    if record.email and not _domain_matches(record.email, university_domain):
-        # Contact was found scoped to the right person, but the email's
-        # domain doesn't belong to the university -- keep it (could be a
-        # legitimate personal/mail.ru address) but don't call it 'high'.
-        confidence = "low" if confidence == "medium" else "medium"
-
-    return Layer2Contract(
-        candidate_id=candidate_id,
-        crawl_status="page_found",
-        full_name=record.fio,
-        contact_type="personal",
-        email=record.email,
-        phone=record.phone,
-        confidence=confidence,
-        source_url=record.source_url,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Fallback path for universities WITHOUT /sveden/employees (Crawl4AI + LLM)
+# Contact parsing (Yandex LLM with regex fallback) and page fetching
 # ---------------------------------------------------------------------------
 
 
 class YandexLLMParser:
-    """Parse crawled HTML using Yandex Cloud LLM API. Used only by the
-    fallback path, never for /sveden/employees."""
+    """Parse crawled HTML using Yandex Cloud LLM API, with a regex fallback
+    scoped to the requested person."""
 
     def __init__(self) -> None:
         self.folder_id = os.getenv("YANDEX_FOLDER_ID", "").strip()
@@ -576,17 +366,14 @@ class YandexLLMParser:
 
 
 class Crawl4AICrawler:
-    """Crawl contacts using Crawl4AI. Only used by the fallback path for
-    universities without a working /sveden/employees page -- never for
-    /sveden/employees itself, which is static and needs no JS rendering.
+    """Fetch pages with Crawl4AI (JS rendering).
 
     Pass a shared, already-running `AsyncWebCrawler` (`browser`) to reuse
-    across many `.crawl()` calls -- launching a full browser per page, as a
-    fresh `async with AsyncWebCrawler(...)` per call used to do, is by far
-    the most expensive part of the fallback crawl. run_layer2 launches one
+    across many `.crawl()` calls -- launching a full browser per page is by
+    far the most expensive part of the crawl. run_layer2 launches one
     browser for the whole run and shares it across every candidate/task;
-    leave `browser=None` (the default) for standalone/one-off use (e.g. the
-    manual smoke test script), which keeps the old launch-per-call behavior.
+    leave `browser=None` (the default) for standalone/one-off use, which
+    keeps the launch-per-call behavior.
     """
 
     def __init__(self, browser: "AsyncWebCrawler | None" = None) -> None:
@@ -615,6 +402,15 @@ class Crawl4AICrawler:
         return None
 
 
+def _name_part_regex(part: str) -> str:
+    """Regex for one name part; е and ё are interchangeable because
+    normalize_fio/split_fio_parts fold ё to е while real pages keep ё
+    (Пётр, Фёдор, Семёнова...)."""
+    return "".join(
+        "[еёЕЁ]" if ch in "еёЕЁ" else re.escape(ch) for ch in part
+    )
+
+
 def _build_loose_name_pattern(
     last: str, first: str, patronymic: str | None, *, strict: bool = False
 ) -> re.Pattern[str] | None:
@@ -623,8 +419,8 @@ def _build_loose_name_pattern(
 
     Matching only the abbreviated "Фамилия И.О." form misses the common
     case of a fully spelled-out name -- "Гончаренко Анастасия Николаевна" --
-    which real contact pages (kontakty/, o-shkole/, etc.) overwhelmingly
-    use instead. This covers, in either word order:
+    which real pages overwhelmingly use instead. This covers, in either
+    word order:
       - full name:           Фамилия Имя Отчество / Имя Отчество Фамилия
       - full, no patronymic: Фамилия Имя / Имя Фамилия
       - abbreviated:          Фамилия И.О. / И.О. Фамилия
@@ -633,17 +429,15 @@ def _build_loose_name_pattern(
     patronymic-agnostic alternatives (surname+first-name alone). Without
     this, "Иванов Иван" matches "Иванов Иван Петрович" *and* "Иванов Иван
     Сидорович" equally -- fine for "is this person worth a closer look on
-    this page" (used while walking the site), but not for deciding which
-    block/page's contact actually belongs to our candidate: a page listing
-    a same-surname-same-first-name colleague right next to ours would let
-    their contact get attributed to us. Callers that are about to pick a
-    specific contact value should pass strict=True.
+    this page" (used while walking the section), but not for deciding which
+    block/page's contact actually belongs to our candidate. Callers that
+    are about to pick a specific contact value should pass strict=True.
     """
     if not last or not first:
         return None
-    last_e = re.escape(last)
-    first_e = re.escape(first)
-    first_initial_e = re.escape(first[0])
+    last_e = _name_part_regex(last)
+    first_e = _name_part_regex(first)
+    first_initial_e = _name_part_regex(first[0])
 
     alternatives: list[str] = []
     if not (strict and patronymic):
@@ -651,8 +445,8 @@ def _build_loose_name_pattern(
         alternatives.append(rf"{first_e}\s+{last_e}\b")
 
     if patronymic:
-        patr_e = re.escape(patronymic)
-        patr_initial_e = re.escape(patronymic[0])
+        patr_e = _name_part_regex(patronymic)
+        patr_initial_e = _name_part_regex(patronymic[0])
         alternatives.append(rf"{last_e}\s+{first_e}\s+{patr_e}\b")
         alternatives.append(rf"{first_e}\s+{patr_e}\s+{last_e}\b")
         alternatives.append(rf"{last_e}\s+{first_initial_e}\.?\s*{patr_initial_e}\.?(?=\W|$)")
@@ -668,88 +462,6 @@ def _build_loose_name_pattern(
 
     pattern = r"\b(?:" + "|".join(alternatives) + r")"
     return re.compile(pattern, re.IGNORECASE)
-
-
-# Site-wide crawl, not just the homepage's own links -- but still capped:
-# an unbounded crawl of a real university site (thousands of pages, PDFs,
-# calendars, news archives...) isn't practical to walk fully within a
-# per-candidate request. This cap is generous enough to reach staff pages
-# that are several clicks deep, while keeping one candidate's fallback
-# lookup bounded.
-PAGES__MAX_DEPTH = 600
-
-_STAFF_LINK_TEXT_KEYWORDS = (
-    "сотрудник", "преподавател", "кафедр", "контакт", "персонал",
-    "структур", "институт", "факультет", "о нас", "команда", "коллектив",
-    "деканат", "адми",
-)
-_STAFF_LINK_HREF_KEYWORDS = (
-    "sotrudnik", "prepodavatel", "kafedra", "kontakt", "staff", "person",
-    "team", "about", "struktur", "faculty", "employee", "personal", "people",
-    "sveden", "contacts",
-)
-_SKIP_EXTENSIONS = (
-    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".zip", ".rar",
-    ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp", ".ico",
-    ".mp4", ".mp3", ".avi", ".css", ".js", ".woff", ".woff2", ".ttf",
-)
-
-
-def _domain_is_blocked(url: str, blocked_keywords: tuple[str, ...]) -> bool:
-    """True if any of `blocked_keywords` occurs (case-insensitive substring
-    match) in the URL's domain -- lets callers exclude whole domains from
-    the fallback crawl (e.g. social networks, unrelated portals a
-    university links to) without touching the crawl logic itself."""
-    if not blocked_keywords:
-        return False
-    domain = urlparse(url).netloc.lower()
-    return any(keyword.lower() in domain for keyword in blocked_keywords if keyword.strip())
-
-
-def _score_internal_link(href: str, text: str) -> int:
-    """Rank a link by how likely it is to be a staff/contacts page, so the
-    fallback crawler tries the promising pages first within its budget
-    instead of walking links in document order."""
-    href_l = href.lower()
-    text_l = text.lower()
-    score = 0
-    if any(k in text_l for k in _STAFF_LINK_TEXT_KEYWORDS):
-        score += 2
-    if any(k in href_l for k in _STAFF_LINK_HREF_KEYWORDS):
-        score += 2
-    return score
-
-
-def _extract_internal_links(
-    html: str, base_url: str, blocked_keywords: tuple[str, ...] = ()
-) -> list[tuple[int, str]]:
-    """Same-domain, crawlable links from a page as (score, url) pairs --
-    called for EVERY page the crawler visits, not just the homepage, so
-    links nested several pages deep are still discovered. Links whose
-    domain matches `blocked_keywords` are dropped here (same check as the
-    homepage/start URL in `_crawl_site_for_name`)."""
-    tree = HTMLParser(html)
-    domain = urlparse(base_url).netloc
-    seen: set[str] = set()
-    results: list[tuple[int, str]] = []
-    for node in tree.css("a[href]"):
-        href = node.attributes.get("href", "")
-        if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
-            continue
-        absolute = urljoin(base_url, href).split("#", 1)[0]
-        parsed = urlparse(absolute)
-        if parsed.netloc != domain:
-            continue
-        if parsed.path.lower().endswith(_SKIP_EXTENSIONS):
-            continue
-        if absolute.rstrip("/") == base_url.rstrip("/") or absolute in seen:
-            continue
-        if _domain_is_blocked(absolute, blocked_keywords):
-            continue
-        seen.add(absolute)
-        text = _clean_text(node.text(separator=" "))
-        results.append((_score_internal_link(absolute, text), absolute))
-    return results
 
 
 async def _fetch_page(
@@ -768,191 +480,285 @@ async def _fetch_page(
     return html
 
 
+# ---------------------------------------------------------------------------
+# Smart priority-driven crawl.
+#
+# Instead of walking links top-to-bottom, every discovered link is scored for
+# how likely it is to lead to THIS candidate's personal/staff page, and the
+# frontier is a priority queue:
+#   - links found in the same markup block as the person's name (the row/card
+#     where the FIO appears) go first -- on alphabet/search index pages the
+#     link right next to the FIO is almost always the personal page;
+#   - alphabet-index links ("А", "Б", ?letter=..) are followed only for the
+#     letter matching the candidate's surname, all other letters are skipped;
+#   - links whose URL/anchor contain the surname (Cyrillic or transliterated)
+#     outrank staff-section links, which outrank everything else;
+#   - pagination gets a small boost, generic navigation sinks to the bottom.
+# The crawl never leaves the university's own site (domain + its subdomains),
+# and page HTML is cached per university, shared across all of its candidates.
+# ---------------------------------------------------------------------------
+
+_SEED_HOST_TEMPLATES = ("{domain}", "www.{domain}")
+
+# Fetch budgets: per-candidate (frontier walk) and per-university (network).
+_MAX_FETCHES_PER_CANDIDATE = 40
+_MAX_FETCHES_PER_DOMAIN = 300
+
+_STAFF_KEYWORDS = (
+    "sotrudnik", "prepodavatel", "kafedra", "staff", "person", "employee",
+    "teacher", "pps", "sostav", "kontakt", "contact", "people", "professor",
+    "employees", "faculty",
+)
+
+_SINGLE_LETTER_RE = re.compile(r"^[А-ЯЁа-яёA-Za-z]$")
+_LETTER_QUERY_RE = re.compile(r"^(?:[A-Za-z_]+=)?([А-ЯЁа-яё])$")
+_PAGINATION_RE = re.compile(r"[?&](?:page|p|pagen[_\d]*)=\d+|/page/\d+", re.I)
+
+
 @dataclass
-class _SiteCrawlState:
-    """Resumable BFS state for one university's fallback crawl. Created once
-    per domain and reused across every candidate at that university (via
-    `_advance_and_find`), instead of re-walking the site from scratch for
-    each one -- with dozens/hundreds of candidates typically sharing a
-    university, restarting a ~200-page crawl per candidate is what made a
-    single-university run take hours."""
+class _DomainCrawlState:
+    """Per-university crawl cache shared across all of its candidates:
+    fetched page HTML ('' = fetch failed, don't retry) and the network-fetch
+    budget counter."""
 
-    frontier: list[tuple[int, int, str]]
-    visited: set[str]
-    queued: set[str]
-    pages: dict[str, str]  # url -> html, every page fetched so far
-    counter: "itertools.count[int]"
-    exhausted: bool = False  # True once the frontier is empty / budget used up
+    pages: dict[str, str] = field(default_factory=dict)
+    fetches: int = 0
 
 
-def _new_site_crawl_state(base_url: str) -> _SiteCrawlState:
-    counter = itertools.count()
-    return _SiteCrawlState(
-        frontier=[(0, next(counter), base_url)],
-        visited=set(),
-        queued={base_url.rstrip("/")},
-        pages={},
-        counter=counter,
-    )
+def _norm_url(url: str) -> str:
+    return url.split("#", 1)[0].rstrip("/")
 
-def _extract_internal_links_enhanced(
-    html: str, base_url: str, blocked_keywords: tuple[str, ...] = (),
-    target_initial: str | None = None, boost_alphabet: bool = False
-) -> list[tuple[int, str]]:
-    """Улучшенная версия извлечения ссылок."""
+
+def _same_site(url: str, domain: str) -> bool:
+    netloc = urlparse(url).netloc.lower().split(":", 1)[0]
+    domain = domain.lower()
+    return netloc == domain or netloc.endswith("." + domain)
+
+
+def _page_links(
+    html: str,
+    base_url: str,
+    domain: str,
+    blocked: tuple[str, ...] = _BLOCKED_URL_KEYWORDS,
+) -> list[tuple[str, str]]:
+    """(absolute_url, anchor_text) pairs for crawlable same-site links."""
     tree = HTMLParser(html)
-    domain = urlparse(base_url).netloc
     seen: set[str] = set()
-    results: list[tuple[int, str]] = []
-
+    out: list[tuple[str, str]] = []
     for node in tree.css("a[href]"):
         href = node.attributes.get("href", "")
         if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
             continue
         absolute = urljoin(base_url, href).split("#", 1)[0]
-        parsed = urlparse(absolute)
-        if parsed.netloc != domain:
+        if not absolute.startswith(("http://", "https://")):
             continue
-        if parsed.path.lower().endswith((
-            ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-            ".zip", ".rar", ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp",
-            ".ico", ".mp4", ".mp3", ".avi", ".css", ".js", ".woff", ".woff2", ".ttf"
-        )):
+        if not _same_site(absolute, domain):
             continue
-        if absolute.rstrip("/") == base_url.rstrip("/") or absolute in seen:
+        if urlparse(absolute).path.lower().endswith(_SKIP_EXTENSIONS):
             continue
-        if any(kw.lower() in parsed.netloc.lower() for kw in blocked_keywords if kw.strip()):
+        if _url_blocked(absolute, blocked):
             continue
-
+        if absolute in seen:
+            continue
         seen.add(absolute)
-        text = _clean_text(node.text(separator=" "))
-        score = _score_internal_link_enhanced(absolute, text, target_initial, boost_alphabet)
-        results.append((score, absolute))
+        out.append((absolute, _clean_text(node.text(separator=" "))))
+    return out
 
-    # Сортируем по убыванию скора
-    return sorted(results, reverse=True)
 
-async def _advance_and_find(
-    state: _SiteCrawlState,
-    crawler: "Crawl4AICrawler",
-    client: HttpClient,
+def _links_near_name(
+    html: str,
+    base_url: str,
+    domain: str,
     pattern: re.Pattern[str],
-    blocked_domain_keywords: tuple[str, ...] = (),
-    max_pages: int = PAGES__MAX_DEPTH,
-    request_delay_sec: float = 0.0,
-    full_name: str | None = None,          # Новый параметр
-) -> tuple[str, str] | None:
-    """Улучшенная версия с интеллектуальным приоритетом."""
-    target_last, _, _ = split_fio_parts(full_name or "")
-    target_initial = target_last[0] if target_last else None
-
-    # Сначала ищем среди уже загруженных страниц
-    for url, html in state.pages.items():
-        if pattern.search(_html_to_text(html)):
-            return url, html
-
-    if state.exhausted:
-        return None
-
-    while state.frontier and len(state.visited) < max_pages:
-        _, _, url = heapq.heappop(state.frontier)
-        norm = url.rstrip("/")
-        if norm in state.visited:
-            continue
-        state.visited.add(norm)
-
-        html = await _fetch_page(url, crawler, client, request_delay_sec)
-        if not html:
-            continue
-
-        state.pages[url] = html
-        has_names = _page_has_any_names(html)
-
-        # Если имён нет — усиливаем приоритет алфавитных ссылок
-        links = _extract_internal_links_enhanced(
-            html, url, blocked_domain_keywords, target_initial, boost_alphabet=not has_names
-        )
-
-        for score, link in links:
-            link_norm = link.rstrip("/")
-            if link_norm in state.visited or link_norm in state.queued:
+    blocked: tuple[str, ...] = _BLOCKED_URL_KEYWORDS,
+) -> list[str]:
+    """Links inside the same per-person markup block (table row, list item,
+    card) where the candidate's name appears -- on index/search pages that
+    nearest link is almost always the personal page."""
+    tree = HTMLParser(html)
+    out: list[str] = []
+    seen: set[str] = set()
+    for selector in ("tr", "li", "dd", "article", "td", "p", "div"):
+        for node in tree.css(selector):
+            text = _clean_text(node.text(separator=" "))
+            if not text or len(text) > 2000 or not pattern.search(text):
                 continue
-            state.queued.add(link_norm)
-            heapq.heappush(state.frontier, (-score, next(state.counter), link))
+            for a in node.css("a[href]"):
+                href = a.attributes.get("href", "")
+                if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
+                    continue
+                absolute = urljoin(base_url, href).split("#", 1)[0]
+                if not absolute.startswith(("http://", "https://")):
+                    continue
+                if not _same_site(absolute, domain):
+                    continue
+                if urlparse(absolute).path.lower().endswith(_SKIP_EXTENSIONS):
+                    continue
+                if _url_blocked(absolute, blocked):
+                    continue
+                if absolute in seen:
+                    continue
+                seen.add(absolute)
+                out.append(absolute)
+        if out:
+            # The smallest matching container type already gave us the
+            # nearest links; larger containers would only add noise.
+            break
+    return out
 
-        if pattern.search(_html_to_text(html)):
-            return url, html
 
-    state.exhausted = True
+def _alphabet_letter(url: str, anchor: str) -> str | None:
+    """If this link is an alphabet-index entry ('А', 'Б', ?letter=В,
+    ?%D0%90), return its letter; otherwise None."""
+    if _SINGLE_LETTER_RE.match(anchor):
+        return anchor
+    query = unquote(urlparse(url).query).strip()
+    match = _LETTER_QUERY_RE.match(query)
+    if match:
+        return match.group(1)
     return None
 
 
-async def _fallback_crawl_and_parse(
+def _score_link(
+    url: str,
+    anchor: str,
+    target_last: str,
+    translit_variants: tuple[str, ...],
+    name_pattern: re.Pattern[str] | None,
+) -> int | None:
+    """Priority score for a link, higher = crawled sooner. None = skip
+    (an alphabet-index link for a different letter than the surname's)."""
+    letter = _alphabet_letter(url, anchor)
+    if letter is not None:
+        return 90 if letter.lower() == target_last[:1].lower() else None
+
+    score = 0
+    low = unquote(url).lower()
+    anchor_low = anchor.lower()
+    last_low = target_last.lower()
+    if name_pattern is not None and name_pattern.search(anchor):
+        score += 120  # anchor text IS the person's name
+    elif last_low and (last_low in anchor_low or last_low in low):
+        score += 100
+    if any(t in low for t in translit_variants):
+        score += 80  # transliterated surname in the URL (personal page slug)
+    if any(k in low or k in anchor_low for k in _STAFF_KEYWORDS):
+        score += 30
+    if _PAGINATION_RE.search(low):
+        score += 10
+    return score
+
+
+async def _smart_crawl_for_candidate(
     candidate_id: str,
     full_name: str,
-    university_domain: str,
+    domain: str,
+    state: _DomainCrawlState,
+    crawler: "Crawl4AICrawler",
     client: HttpClient,
-    blocked_domain_keywords: tuple[str, ...] = (),
-    site_crawl_states: dict[str, "_SiteCrawlState"] | None = None,
-    crawler: "Crawl4AICrawler | None" = None,
     request_delay_sec: float = 0.0,
-) -> Layer2Contract:
-    base_url = f"https://{university_domain}".rstrip("/")
+    source_url: str | None = None,
+    blocked_keywords: tuple[str, ...] = _BLOCKED_URL_KEYWORDS,
+) -> Layer2Contract | None:
+    """Best-first crawl of the university site for this candidate.
 
+    Returns a contract with contacts as soon as an LLM/regex parse of a
+    page mentioning the person yields an email/phone; a contact-less
+    page_found contract if the person was seen but no contact surfaced;
+    None if the person was never found."""
     target_last, target_first, target_patr = split_fio_parts(full_name)
-    pattern = _build_loose_name_pattern(target_last, target_first, target_patr)
-    if not pattern:
-        return Layer2Contract(candidate_id=candidate_id, crawl_status="page_not_found")
+    if not target_last or not target_first:
+        return None
+    loose_pattern = _build_loose_name_pattern(target_last, target_first, target_patr)
+    if loose_pattern is None:
+        return None
+    translit = _surname_translit_variants(target_last)
 
-    if _domain_is_blocked(base_url, blocked_domain_keywords):
-        return Layer2Contract(candidate_id=candidate_id, crawl_status="page_not_found")
+    counter = itertools.count()
+    frontier: list[tuple[int, int, str]] = []
+    queued: set[str] = set()
+    visited: set[str] = set()
 
-    if site_crawl_states is None:
-        site_crawl_states = {}
-    state = site_crawl_states.get(university_domain)
-    if state is None:
-        state = _new_site_crawl_state(base_url)
-        site_crawl_states[university_domain] = state
+    def push(url: str, score: int) -> None:
+        norm = _norm_url(url)
+        if norm in visited or norm in queued:
+            return
+        queued.add(norm)
+        heapq.heappush(frontier, (-score, next(counter), url))
 
-    if crawler is None:
-        crawler = Crawl4AICrawler()
+    if source_url and _same_site(source_url, domain) and not _url_blocked(source_url, blocked_keywords):
+        push(source_url, 70)
+    for template in _SEED_HOST_TEMPLATES:
+        push(f"https://{template.format(domain=domain)}/", 15)
 
-    match = await _advance_and_find(
-        state, crawler, client, pattern, blocked_domain_keywords,
-        full_name=full_name,                    # Передаём имя
-        request_delay_sec=request_delay_sec,
-    )
-
-    if not match:
-        return Layer2Contract(candidate_id=candidate_id, crawl_status="page_not_found")
-
-    matched_url, html = match
     parser = YandexLLMParser()
+    best_no_contact: Layer2Contract | None = None
+    fetched = 0
 
-    try:
-        parse_result = await parser.parse(html, full_name, candidate_id)
-    except Exception as e:
-        _LOGGER.error(f"Parse error for {candidate_id}: {e}")
-        return Layer2Contract(candidate_id=candidate_id, crawl_status="error", error_message=str(e), source_url=matched_url)
+    while frontier and fetched < _MAX_FETCHES_PER_CANDIDATE:
+        _, _, url = heapq.heappop(frontier)
+        norm = _norm_url(url)
+        if norm in visited:
+            continue
+        visited.add(norm)
 
-    return Layer2Contract(
-        candidate_id=candidate_id,
-        crawl_status="page_found",
-        full_name=parse_result.get("full_name") or full_name,
-        email=parse_result.get("email"),
-        phone=parse_result.get("phone"),
-        contact_type=parse_result.get("contact_type") or "none",
-        confidence=parse_result.get("confidence", "low"),
-        source_url=matched_url,
-    )
+        html = state.pages.get(norm)
+        if html is None:
+            if state.fetches >= _MAX_FETCHES_PER_DOMAIN:
+                break
+            state.fetches += 1
+            fetched += 1
+            html = await _fetch_page(url, crawler, client, request_delay_sec) or ""
+            state.pages[norm] = html
+        if not html:
+            continue
+
+        page_text = _html_to_text(html)
+        name_on_page = bool(loose_pattern.search(page_text))
+
+        if name_on_page:
+            # The link right next to the FIO is almost certainly the
+            # personal page -- crawl it before anything else.
+            for near in _links_near_name(html, url, domain, loose_pattern, blocked_keywords):
+                push(near, 200)
+            try:
+                parse_result = await parser.parse(html, full_name, candidate_id)
+            except Exception as e:  # noqa: BLE001
+                _LOGGER.warning(f"Layer2 parse error for {candidate_id} on {url}: {e}")
+                parse_result = None
+            if parse_result and (parse_result.get("email") or parse_result.get("phone")):
+                return Layer2Contract(
+                    candidate_id=candidate_id,
+                    crawl_status="page_found",
+                    full_name=parse_result.get("full_name") or full_name,
+                    email=parse_result.get("email"),
+                    phone=parse_result.get("phone"),
+                    contact_type=parse_result.get("contact_type") or "personal",
+                    confidence=parse_result.get("confidence", "medium"),
+                    source_url=url,
+                )
+            if best_no_contact is None:
+                best_no_contact = Layer2Contract(
+                    candidate_id=candidate_id,
+                    crawl_status="page_found",
+                    full_name=full_name,
+                    contact_type="none",
+                    confidence="low",
+                    source_url=url,
+                )
+
+        for link, anchor in _page_links(html, url, domain, blocked_keywords):
+            score = _score_link(link, anchor, target_last, translit, loose_pattern)
+            if score is None:
+                continue
+            push(link, score)
+
+    return best_no_contact
 
 
 # ---------------------------------------------------------------------------
 # Entry points
 # ---------------------------------------------------------------------------
-
-
-_UNFETCHED = object()  # sentinel: caller did not pass a pre-fetched directory
 
 
 async def crawl_and_parse_contact(
@@ -962,34 +768,17 @@ async def crawl_and_parse_contact(
     search_term: str | None = None,
     source_url: str | None = None,
     client: HttpClient | None = None,
-    employees_directory: Any = _UNFETCHED,
-    blocked_domain_keywords: tuple[str, ...] = (),
-    site_crawl_states: dict[str, "_SiteCrawlState"] | None = None,
+    crawl_states: dict[str, "_DomainCrawlState"] | None = None,
     crawler: "Crawl4AICrawler | None" = None,
     request_delay_sec: float = 0.0,
+    blocked_keywords: tuple[str, ...] = _BLOCKED_URL_KEYWORDS,
 ) -> Layer2Contract:
     """Crawl and parse contact info for a candidate.
 
-    `employees_directory`: pass the /sveden/employees records for this
-    university (a `list[EmployeeRecord]`, or `None` if layer1 never found a
-    working page) -- normally sourced from the DB via
-    `load_employees_directory_from_db`, since layer1 already fetched and
-    parsed this exact page for every university and re-downloading it in
-    layer2 would just repeat that work. Leave the default sentinel only for
-    one-off/manual calls with no DB context, which fetches over HTTP
-    directly; pass `None` explicitly to force the fallback path.
-
-    `blocked_domain_keywords`: case-insensitive substrings that, if found
-    in a domain, exclude it from the fallback crawler (both the starting
-    university domain and any links discovered while crawling it). Only
-    applies to the fallback path -- the strict /sveden/employees path never
-    leaves the university's own domain to begin with.
-
-    `site_crawl_states`: shared, mutable per-domain fallback-crawl progress
-    (see `_SiteCrawlState`). Pass the SAME dict across every candidate call
-    in a batch (run_layer2 does this) so a university's site is crawled
-    incrementally, resuming from where the last candidate's lookup left
-    off, instead of restarting a full site walk per candidate.
+    `crawl_states`: shared, mutable per-domain crawl cache (see
+    `_DomainCrawlState`). Pass the SAME dict across every candidate call in
+    a batch (run_layer2 does this) so pages fetched for one candidate are
+    reused for the next instead of being re-downloaded.
     """
     if client is None:
         client = HttpClient(request_delay_sec=2.0)
@@ -1001,37 +790,24 @@ async def crawl_and_parse_contact(
             error_message="full_name is required for layer2 contact search",
         )
 
-    directory = employees_directory
-    if directory is _UNFETCHED:
-        directory = fetch_employees_directory(university_domain, client)
-
-    strict_contract: Layer2Contract | None = None
-    if directory is not None:
-        record, status = match_employee(directory, full_name)
-        strict_contract = contract_from_employees_match(
-            candidate_id, full_name, university_domain, record, status
-        )
-        if strict_contract.contact_type != "none":
-            return strict_contract
-        # /sveden/employees is a legally-mandated public roster (FIO, post,
-        # degree, disciplines...) but essentially never publishes personal
-        # email/phone -- so a "found the person, no contact" result here is
-        # normal, not a dead end. Fall through to the generic-site crawl
-        # (department/contacts pages) instead of stopping.
-
-    fallback_contract = await _fallback_crawl_and_parse(
-        candidate_id, full_name, university_domain, client,
-        blocked_domain_keywords=blocked_domain_keywords,
-        site_crawl_states=site_crawl_states,
-        crawler=crawler,
+    if crawl_states is None:
+        crawl_states = {}
+    state = crawl_states.get(university_domain)
+    if state is None:
+        state = _DomainCrawlState()
+        crawl_states[university_domain] = state
+    crawl_contract = await _smart_crawl_for_candidate(
+        candidate_id, full_name, university_domain, state,
+        crawler if crawler is not None else Crawl4AICrawler(), client,
         request_delay_sec=request_delay_sec,
+        source_url=source_url,
+        blocked_keywords=blocked_keywords,
     )
-    if fallback_contract.contact_type != "none":
-        return fallback_contract
-    # Neither path found a contact -- prefer the strict-path result if we
-    # have one, since it carries richer metadata (matched record, name
-    # confidence) than a plain "page_not_found" from the fallback crawl.
-    return strict_contract if strict_contract is not None else fallback_contract
+    if crawl_contract is not None:
+        return crawl_contract
+    return Layer2Contract(candidate_id=candidate_id, crawl_status="page_not_found")
+
+
 
 
 def run_layer2(
@@ -1046,20 +822,17 @@ def run_layer2(
 ) -> None:
     """Run Layer 2 crawling and parsing for candidates.
 
-    `blocked_domain_keywords`: domains matching any of these (substring,
-    case-insensitive) are skipped by the fallback crawler -- e.g. social
-    networks or unrelated portals a university links to that would
-    otherwise waste crawl budget without ever having the candidate's
-    contact info.
+    `blocked_domain_keywords`: extra words to add to the builtin URL
+    stop-list `_BLOCKED_URL_KEYWORDS` (news, gallery, login...); links whose
+    URL contains any of them are never fetched or followed.
 
     `domain`: restrict to one university's domain (e.g. "utmn.ru") -- same
     convention as run_layer1/export_xlsx/run_ingest, for testing/debugging
     a single site without burning Crawl4AI/LLM calls on the rest of the DB.
 
-    `limit`: cap on how many candidates to process this call (default 100,
-    same as before); pass a smaller number for a quick smoke run.
+    `limit`: cap on how many candidates to process this call (default 100);
+    pass a smaller number for a quick smoke run.
     """
-    blocked_domain_keywords = tuple(blocked_domain_keywords)
     db_path = Path(db_path)
     with open_repository(db_path) as repo:
         sql = """
@@ -1100,7 +873,9 @@ def run_layer2(
         db_path,
         request_delay_sec=request_delay_sec,
         workers=workers,
-        blocked_domain_keywords=blocked_domain_keywords,
+        blocked_keywords=_BLOCKED_URL_KEYWORDS + tuple(
+            w.lower() for w in blocked_domain_keywords
+        ),
     ))
 
     _LOGGER.info("Layer 2 processing completed")
@@ -1112,27 +887,14 @@ async def _run_layer2_candidates(
     *,
     request_delay_sec: float,
     workers: int,
-    blocked_domain_keywords: tuple[str, ...],
+    blocked_keywords: tuple[str, ...] = _BLOCKED_URL_KEYWORDS,
 ) -> None:
     """Process every candidate concurrently, bounded by `workers` at a time,
-    sharing one browser instance and one incremental per-domain site walk
-    (`site_crawl_states`) across all of them. Launching a fresh browser and
-    restarting the site walk per candidate -- what the old sequential loop
-    did -- is what made a single university's batch take hours; this keeps
-    both shared while still letting up to `workers` candidates make network
-    requests at the same time.
-    """
-    # Read /sveden/employees once per university_id from employees_raw
-    # instead of fetching it again: layer1 already downloaded and parsed
-    # this exact page for every university, so layer2 reuses that result
-    # rather than re-crawling it (no network call for the strict path at
-    # all, cached in-process per university_id for candidates that share a
-    # university).
-    directory_cache: dict[int, list[EmployeeRecord] | None] = {}
-    # Shared across every candidate in this batch (see `_SiteCrawlState`):
-    # a university's fallback site crawl resumes for the next candidate
-    # instead of restarting.
-    site_crawl_states: dict[str, "_SiteCrawlState"] = {}
+    sharing one browser instance and one per-domain crawl cache
+    (`crawl_states`) across all of them."""
+    # Shared across every candidate in this batch (see `_DomainCrawlState`):
+    # pages fetched for one candidate are reused for the next.
+    crawl_states: dict[str, "_DomainCrawlState"] = {}
     semaphore = asyncio.Semaphore(max(1, workers))
     # sqlite3 writes aren't safe to interleave even across coroutines on one
     # thread (one task's commit could land mid another's); this only
@@ -1140,12 +902,6 @@ async def _run_layer2_candidates(
     write_lock = asyncio.Lock()
 
     with open_repository(db_path) as repo:
-        for cand in candidates:
-            if cand["university_id"] not in directory_cache:
-                directory_cache[cand["university_id"]] = load_employees_directory_from_db(
-                    repo, cand["university_id"]
-                )
-
         async def process_one(cand: dict[str, Any], crawler: "Crawl4AICrawler | None", http_client: HttpClient) -> None:
             async with semaphore:
                 try:
@@ -1155,15 +911,14 @@ async def _run_layer2_candidates(
                         university_domain=cand["domain"],
                         source_url=cand["source_url"],
                         client=http_client,
-                        employees_directory=directory_cache[cand["university_id"]],
-                        blocked_domain_keywords=blocked_domain_keywords,
-                        site_crawl_states=site_crawl_states,
+                        crawl_states=crawl_states,
                         crawler=crawler,
                         # HttpClient itself is constructed with delay=0 below;
                         # this is the single place the delay is applied now,
                         # right after each real network fetch (see
                         # _fetch_page), instead of once per candidate.
                         request_delay_sec=request_delay_sec,
+                        blocked_keywords=blocked_keywords,
                     )
                 except Exception as e:
                     _LOGGER.error(f"Error processing candidate {cand['candidate_id']}: {e}")
@@ -1194,4 +949,5 @@ async def _run_layer2_candidates(
                     crawler = Crawl4AICrawler(browser)
                     await asyncio.gather(*(process_one(c, crawler, http_client) for c in candidates))
             else:
-                await asyncio.gather(*(process_one(c, None, http_client) for c in candidates))
+                crawler = Crawl4AICrawler()
+                await asyncio.gather(*(process_one(c, crawler, http_client) for c in candidates))
