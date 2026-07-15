@@ -41,55 +41,7 @@ class Repository:
   def init_schema(self) -> None:
     ddl = SCHEMA_PATH.read_text(encoding="utf-8")
     self.conn.executescript(ddl)
-    self._migrate_vak_raw()
-    self._migrate_employees_raw()
-    self._migrate_candidates()
-    self._remove_vk_columns()
     self.conn.commit()
-
-  def _migrate_employees_raw(self) -> None:
-    existing = {row["name"] for row in self.execute("PRAGMA table_info(employees_raw)")}
-    for col, col_type in (
-      ("teaching_level", "TEXT"),
-      ("employee_qualification", "TEXT"),
-      ("prof_development", "TEXT"),
-      ("teaching_op", "TEXT"),
-    ):
-      if col not in existing:
-        self.execute(f"ALTER TABLE employees_raw ADD COLUMN {col} {col_type}")
-
-  def _migrate_candidates(self) -> None:
-    existing = {row["name"] for row in self.execute("PRAGMA table_info(candidates)")}
-    for col, col_type in (
-      ("post", "TEXT"),
-      ("academic_title", "TEXT"),
-      ("gen_experience", "INTEGER"),
-      ("spec_experience", "INTEGER"),
-      ("source_url", "TEXT"),
-    ):
-      if col not in existing:
-        self.execute(f"ALTER TABLE candidates ADD COLUMN {col} {col_type}")
-
-  def _remove_vk_columns(self) -> None:
-    """Remove obsolete VK data from databases created by older versions."""
-    for table, columns in (
-      ("universities", ("vk_group_id",)),
-      ("candidates", ("vk_url", "vk_score", "vk_status")),
-    ):
-      existing = {row["name"] for row in self.execute(f"PRAGMA table_info({table})")}
-      for column in columns:
-        if column in existing:
-          self.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
-
-  def _migrate_vak_raw(self) -> None:
-    existing = {row["name"] for row in self.execute("PRAGMA table_info(vak_raw)")}
-    for col, col_type in (
-      ("council_cipher", "TEXT"),
-      ("org_address", "TEXT"),
-      ("org_phone", "TEXT"),
-    ):
-      if col not in existing:
-        self.execute(f"ALTER TABLE vak_raw ADD COLUMN {col} {col_type}")
 
   def execute(self, sql: str, params: tuple[Any, ...] | list[Any] = ()) -> sqlite3.Cursor:
     return self.conn.execute(sql, params)
