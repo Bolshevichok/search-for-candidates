@@ -20,6 +20,8 @@ _SCALAR_FIELDS = (
   "employee_qualification",
   "prof_development",
   "teaching_op",
+  "email",
+  "phone",
   "source_url",
 )
 

@@ -39,6 +39,8 @@ Thumbs.db
 *.swo
 .idea/
 .vscode/
+*.sqlite
+111
 
 # Playwright (if used locally)
 playwright-report/

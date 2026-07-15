@@ -20,6 +20,10 @@ from app.sources.http_client import HttpClient
 from app.sources.universities.struct import DepartmentResolver
 
 _EMPLOYEES_PATH = "/sveden/employees"
+_EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+_PHONE_RE = re.compile(
+  r"(?:\+7|8)[\s\-]?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}|\+\d{1,3}[\s\-]?\d{7,14}"
+)
 _SKIP_LINK_PARTS = (
   "/sveden/struct",
   "/sveden/edustandarts",
@@ -50,6 +54,19 @@ def _itemprop_text(block: Any, name: str) -> str | None:
     return None
   text = _clean_text(node.text(separator=" "))
   return text or None
+
+
+def _scoped_contact(block: Any, itemprop_name: str, pattern: re.Pattern[str]) -> str | None:
+  """Look for a contact value only inside this person's own markup block,
+  never the full page text (same rule layer2 used to apply on its own
+  re-fetch of this page)."""
+  explicit = _itemprop_text(block, itemprop_name)
+  if explicit:
+    match = pattern.search(explicit)
+    return match.group() if match else explicit
+  block_text = _clean_text(block.text(separator=" "))
+  match = pattern.search(block_text)
+  return match.group() if match else None
 
 
 def _itemprop_list(block: Any, name: str) -> list[str]:
@@ -119,6 +136,8 @@ def parse_teaching_staff(html: str, source_url: str) -> list[dict[str, Any]]:
         "employee_qualification": _itemprop_text(block, "employeeQualification"),
         "prof_development": _itemprop_text(block, "profDevelopment"),
         "teaching_op": _itemprop_text(block, "teachingOp"),
+        "email": _scoped_contact(block, "email", _EMAIL_RE),
+        "phone": _scoped_contact(block, "phone", _PHONE_RE),
         "gen_experience": _parse_int(_itemprop_text(block, "genExperience")),
         "spec_experience": _parse_int(_itemprop_text(block, "specExperience")),
         "source_url": source_url,
@@ -247,12 +266,13 @@ def run_layer1(
   request_delay_sec: float = 1.5,
   max_universities: int | None = None,
   workers: int = 4,
+  domain: str | None = None,
 ) -> None:
   with open_repository(db_path, init=False) as repo:
     done = repo.get_done_university_ids(run_id, "layer1")
     universities = [
       uni
-      for uni in repo.list_universities(limit=max_universities)
+      for uni in repo.list_universities(limit=max_universities, domain=domain)
       if int(uni["university_id"]) not in done
     ]
 

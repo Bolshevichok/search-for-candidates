@@ -44,6 +44,7 @@ class Repository:
     self._migrate_vak_raw()
     self._migrate_employees_raw()
     self._migrate_candidates()
+    self._migrate_run_steps()
     self.conn.commit()
 
   def _migrate_employees_raw(self) -> None:
@@ -53,6 +54,8 @@ class Repository:
       ("employee_qualification", "TEXT"),
       ("prof_development", "TEXT"),
       ("teaching_op", "TEXT"),
+      ("email", "TEXT"),
+      ("phone", "TEXT"),
     ):
       if col not in existing:
         self.execute(f"ALTER TABLE employees_raw ADD COLUMN {col} {col_type}")
@@ -78,6 +81,42 @@ class Repository:
     ):
       if col not in existing:
         self.execute(f"ALTER TABLE vak_raw ADD COLUMN {col} {col_type}")
+
+  def _migrate_run_steps(self) -> None:
+    """Older DB files were created with `step IN ('layer1','vak','match',
+    'export')` -- missing 'layer2', which run_layer2() now writes via
+    mark_step_done(). SQLite can't ALTER a CHECK constraint, so if the
+    existing table's own CREATE statement doesn't mention 'layer2', rebuild
+    it under the current (wider) constraint and copy the rows over."""
+    row = self.execute(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'run_steps'"
+    ).fetchone()
+    if row is None or "layer2" in (row["sql"] or ""):
+      return  # table doesn't exist yet (fresh DB, schema.sql above already
+      # created it with 'layer2') or already migrated
+    self.conn.executescript(
+      """
+      ALTER TABLE run_steps RENAME TO run_steps_old;
+      CREATE TABLE run_steps (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          run_id INTEGER NOT NULL REFERENCES runs(run_id),
+          step TEXT NOT NULL CHECK (step IN ('layer1', 'vak', 'match', 'layer2', 'export')),
+          university_id INTEGER REFERENCES universities(university_id),
+          status TEXT NOT NULL CHECK (status IN ('pending', 'done', 'error')),
+          university_site_hash TEXT,
+          checkpoint_cursor INTEGER,
+          error_message TEXT,
+          UNIQUE (run_id, step, university_id)
+      );
+      INSERT INTO run_steps (id, run_id, step, university_id, status,
+                              university_site_hash, checkpoint_cursor, error_message)
+        SELECT id, run_id, step, university_id, status,
+               university_site_hash, checkpoint_cursor, error_message
+        FROM run_steps_old;
+      DROP TABLE run_steps_old;
+      CREATE INDEX IF NOT EXISTS idx_run_steps_run ON run_steps(run_id, step);
+      """
+    )
 
   def execute(self, sql: str, params: tuple[Any, ...] | list[Any] = ()) -> sqlite3.Cursor:
     return self.conn.execute(sql, params)
@@ -218,11 +257,16 @@ class Repository:
     self.commit()
     return university_id
 
-  def list_universities(self, limit: int | None = None) -> list[sqlite3.Row]:
-    sql = "SELECT * FROM universities ORDER BY university_id"
+  def list_universities(self, limit: int | None = None, domain: str | None = None) -> list[sqlite3.Row]:
+    sql = "SELECT * FROM universities"
+    params: list[Any] = []
+    if domain is not None:
+      sql += " WHERE domain = ?"
+      params.append(domain)
+    sql += " ORDER BY university_id"
     if limit is not None:
       sql += f" LIMIT {int(limit)}"
-    return list(self.execute(sql).fetchall())
+    return list(self.execute(sql, tuple(params)).fetchall())
 
   def set_university_layer1_status(self, university_id: int, status: str) -> None:
     self.execute(
@@ -263,6 +307,7 @@ class Repository:
           department_raw = ?, department_id = ?, disciplines = ?,
           gen_experience = ?, spec_experience = ?,
           teaching_level = ?, employee_qualification = ?, prof_development = ?, teaching_op = ?,
+          email = COALESCE(?, email), phone = COALESCE(?, phone),
           source_url = ?
         WHERE employee_id = ?
         """,
@@ -281,6 +326,8 @@ class Repository:
           record.get("employee_qualification"),
           record.get("prof_development"),
           record.get("teaching_op"),
+          record.get("email"),
+          record.get("phone"),
           record["source_url"],
           existing["employee_id"],
         ),
@@ -292,8 +339,8 @@ class Repository:
           university_id, fio, fio_normalized, post, degree, academic_title,
           department_raw, department_id, disciplines, gen_experience, spec_experience,
           teaching_level, employee_qualification, prof_development, teaching_op,
-          identity_key, source_url
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          email, phone, identity_key, source_url
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
           record["university_id"],
@@ -311,11 +358,30 @@ class Repository:
           record.get("employee_qualification"),
           record.get("prof_development"),
           record.get("teaching_op"),
+          record.get("email"),
+          record.get("phone"),
           record["identity_key"],
           record["source_url"],
         ),
       )
     self.commit()
+
+  def get_employees_for_university(self, university_id: int) -> list[dict[str, Any]]:
+    """Read back layer1's already-parsed /sveden/employees rows for this
+    university, so layer2 can match contacts without re-fetching the page."""
+    rows = self.execute(
+      "SELECT fio, fio_normalized, post, email, phone, source_url "
+      "FROM employees_raw WHERE university_id = ?",
+      (university_id,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+  def get_university_layer1_status(self, university_id: int) -> str | None:
+    row = self.execute(
+      "SELECT layer1_status FROM universities WHERE university_id = ?",
+      (university_id,),
+    ).fetchone()
+    return row["layer1_status"] if row else None
 
   def upsert_vak_record(self, record: dict[str, Any]) -> None:
     self.execute(
