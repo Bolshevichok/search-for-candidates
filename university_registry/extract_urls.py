@@ -1,4 +1,3 @@
-"""Extract data-file URLs from obrnadzor RAOO open-data HTML page."""
 import re
 from pathlib import Path
 
