@@ -22,6 +22,9 @@ data/state.sqlite-*
 output/
 logs/
 
+# Local VK experiments, snapshots and profile-contact samples
+research/
+
 # Script artifacts: raw downloads, caches, exploration scratch (rebuild via university_registry/download_accred_data.py)
 # Everything scraped/downloaded while researching sources (HTML/JS/zip/etc.) lives here, not in git.
 data/raw/

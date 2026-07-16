@@ -4,3 +4,8 @@ limits:
   layer1_workers: 4
   vak_request_delay_sec: 0.0
   vak_detail_workers: 8
+  vk_enabled: false
+  vk_workers: 1
+  vk_request_delay_sec: 0.15
+  vk_limit: 100
+  vk_extract_public_contacts: false

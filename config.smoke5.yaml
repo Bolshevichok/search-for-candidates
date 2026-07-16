@@ -1,7 +1,7 @@
 limits:
   request_delay_sec: 1.0
   max_universities: 5
-  vak_max_pages: 15
+  vak_max_pages: 5
   layer1_workers: 4
   vak_request_delay_sec: 0.0
   vak_detail_workers: 8
