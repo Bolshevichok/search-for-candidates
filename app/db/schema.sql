@@ -1,5 +1,3 @@
--- Core pipeline MVP schema (see specs/001-core-pipeline-mvp/data-model.md)
-
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS universities (

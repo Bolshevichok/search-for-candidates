@@ -1,5 +1,3 @@
-"""Merge duplicate layer1 employee rows within one university."""
-
 from __future__ import annotations
 
 from typing import Any
