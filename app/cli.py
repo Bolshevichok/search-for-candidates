@@ -12,6 +12,7 @@ from app.registry.loader import load_registry
 from app.sources.universities.layer1 import run_layer1
 from app.sources.universities.layer2 import run_layer2
 from app.sources.vak.pipeline import run_vak
+from app.sources.vk.browser import run_vk
 
 
 def _ensure_run(repo) -> int:
@@ -25,6 +26,8 @@ def _prepare_run(repo) -> int:
   run_id = _ensure_run(repo)
   if repo.count_table("universities") == 0:
     load_registry(repo)
+  elif repo.count_table("university_vk_communities") == 0:
+    load_registry(repo)
   return run_id
 
 
@@ -34,6 +37,16 @@ def cmd_run(args: argparse.Namespace) -> int:
     run_id = _prepare_run(repo)
     run_ingest(run_id, cfg.limits, db_path=args.db, domain=args.domain)
     run_match(repo, run_id)
+    if cfg.limits.vk_enabled:
+      run_vk(
+        args.db,
+        run_id,
+        request_delay_sec=cfg.limits.vk_request_delay_sec,
+        workers=cfg.limits.vk_workers,
+        domain=args.domain,
+        limit=cfg.limits.vk_limit,
+        extract_public_contacts=cfg.limits.vk_extract_public_contacts,
+      )
     out = Path(args.out) if args.out else default_output_path()
     export_xlsx(repo, out, domain=args.domain)
     repo.finish_run(run_id, "success")
@@ -71,6 +84,17 @@ def cmd_step(args: argparse.Namespace) -> int:
         domain=args.domain,
         limit=args.limit if args.limit is not None else cfg.limits.layer2_limit,
       )
+    elif args.step_name == "vk":
+      run_vk(
+        args.db,
+        run_id,
+        request_delay_sec=cfg.limits.vk_request_delay_sec,
+        workers=cfg.limits.vk_workers,
+        domain=args.domain,
+        limit=args.limit if args.limit is not None else cfg.limits.vk_limit,
+        extract_public_contacts=cfg.limits.vk_extract_public_contacts,
+        refresh=args.refresh,
+      )
     elif args.step_name == "match":
       run_match(repo, run_id)
     print(f"Step {args.step_name} completed for run {run_id}.")
@@ -79,7 +103,7 @@ def cmd_step(args: argparse.Namespace) -> int:
 
 def cmd_export(args: argparse.Namespace) -> int:
   out = Path(args.out)
-  with open_repository(args.db, init=False) as repo:
+  with open_repository(args.db) as repo:
     export_xlsx(repo, out, domain=args.domain)
   print(f"Exported to {out}")
   return 0
@@ -90,7 +114,7 @@ def cmd_status(args: argparse.Namespace) -> int:
   if not db_path.exists():
     print("Database not found.")
     return 0
-  with open_repository(args.db, init=False) as repo:
+  with open_repository(args.db) as repo:
     uni_ok = repo.execute(
       "SELECT COUNT(*) AS c FROM universities WHERE layer1_status = 'ok'"
     ).fetchone()["c"]
@@ -102,6 +126,8 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"employees_raw: {repo.count_table('employees_raw')}")
     print(f"vak_raw: {repo.count_table('vak_raw')}")
     print(f"candidates: {repo.count_table('candidates')}")
+    print(f"VK communities: {repo.count_table('university_vk_communities')}")
+    print(f"VK profile checks: {repo.count_table('candidate_vk_profiles')}")
     print(f"DB size: {db_path.stat().st_size} bytes")
     last = repo.execute(
       "SELECT status, finished_at FROM runs ORDER BY run_id DESC LIMIT 1"
@@ -113,10 +139,10 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def cmd_reset(args: argparse.Namespace) -> int:
-  if Path(args.db).exists():
-    with open_repository(args.db) as repo:
-      repo.reset_database()
-  print("Database reset.")
+  db_path = Path(args.db)
+  if db_path.exists():
+    db_path.unlink()
+  print("Database removed. It will be recreated from schema.sql on the next run.")
   return 0
 
 
@@ -136,10 +162,15 @@ def build_parser() -> argparse.ArgumentParser:
   p_run.set_defaults(func=cmd_run)
 
   p_step = sub.add_parser("step", help="Run a single step")
-  p_step.add_argument("step_name", choices=["layer1", "vak", "layer2", "match"])
+  p_step.add_argument("step_name", choices=["layer1", "vak", "layer2", "vk", "match"])
   p_step.add_argument(
     "--limit", type=int, default=None,
-    help="layer2 only: max candidates to process (default: config limits.layer2_limit, currently 100)",
+    help="layer2/vk only: max candidates to process (default comes from config)",
+  )
+  p_step.add_argument(
+    "--refresh",
+    action="store_true",
+    help="vk only: repeat previously checked candidate/community pairs",
   )
   p_step.set_defaults(func=cmd_step)
 

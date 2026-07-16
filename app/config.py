@@ -21,6 +21,11 @@ class Limits:
   layer2_request_delay_sec: float = 2.0
   layer2_limit: int = 100
   layer2_blocked_domain_keywords: list[str] = field(default_factory=list)
+  vk_workers: int = 1
+  vk_request_delay_sec: float = 0.15
+  vk_limit: int = 100
+  vk_extract_public_contacts: bool = False
+  vk_enabled: bool = False
 
 
 @dataclass
@@ -50,6 +55,11 @@ def load_config(config_path: Path | str = "config.yaml") -> AppConfig:
       layer2_request_delay_sec=float(limits_raw.get("layer2_request_delay_sec", 2.0)),
       layer2_limit=int(limits_raw.get("layer2_limit", 100)),
       layer2_blocked_domain_keywords=list(limits_raw.get("layer2_blocked_domain_keywords", [])),
+      vk_workers=int(limits_raw.get("vk_workers", 1)),
+      vk_request_delay_sec=float(limits_raw.get("vk_request_delay_sec", 0.15)),
+      vk_limit=int(limits_raw.get("vk_limit", 100)),
+      vk_extract_public_contacts=bool(limits_raw.get("vk_extract_public_contacts", False)),
+      vk_enabled=bool(limits_raw.get("vk_enabled", False)),
     ),
   )
   return cfg
