@@ -33,7 +33,7 @@ python -m app status
 python -m app reset
 
 # Создать XLSX из уже собранных данных
-python -m app export --out output/candidates.xlsx
+![1784229105281](image/README/1784229105281.png)
 ```
 
 ## Обогощение записей контактами
@@ -43,6 +43,15 @@ python -m app export --out output/candidates.xlsx
 ```powershell
 python -m app step layer2 --limit 100
 ```
+
+## Обогащение профилями VK без API
+
+```powershell
+# Для ТюмГУ: один последовательный индекс публичных подписчиков, затем
+# обработка максимум 20 кандидатов из базы. Логин и VK API не нужны.
+python -m app --domain utmn.ru step vk --limit 20
+```
+
 
 ## Структура проекта
 
