@@ -1,5 +1,3 @@
-"""Build stable identity_key for employee deduplication (§4.1.1)."""
-
 from __future__ import annotations
 
 

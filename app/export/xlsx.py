@@ -1,5 +1,3 @@
-"""XLSX export: separate site and VAK sheets."""
-
 from __future__ import annotations
 
 import json

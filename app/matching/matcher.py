@@ -1,4 +1,3 @@
-"""Match layer1 employees with VAK records (4 statuses + possible_namesakes)."""
 from __future__ import annotations
 
 import hashlib

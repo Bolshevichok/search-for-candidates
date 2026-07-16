@@ -1,5 +1,3 @@
-"""Load university_registry.csv into the universities table."""
-
 from __future__ import annotations
 
 import csv
