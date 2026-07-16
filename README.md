@@ -33,7 +33,7 @@ python -m app status
 python -m app reset
 
 # Создать XLSX из уже собранных данных
-![1784229105281](image/README/1784229105281.png)
+python -m app export --out output/candidates.xlsx  
 ```
 
 ## Обогощение записей контактами
