@@ -27,8 +27,6 @@ logs/
 data/raw/
 
 # Regeneratable registry sidecars (main CSV: data/university_registry.csv — keep in git)
-data/university_registry.json
-data/university_registry.meta.json
 data/university_registry_vk_review.csv
 
 # OS / editor

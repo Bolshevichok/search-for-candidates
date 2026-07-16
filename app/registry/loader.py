@@ -22,7 +22,7 @@ def load_registry(
 ) -> int:
   path = Path(registry_path)
   count = 0
-  with path.open(encoding="utf-8", newline="") as fh:
+  with path.open(encoding="utf-8-sig", newline="") as fh:
     reader = csv.DictReader(fh)
     for row in reader:
       domain = (row.get("domain") or "").strip() or None

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import html
-import json
 import re
 import zipfile
 from pathlib import Path
@@ -12,8 +11,6 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parents[1]
 ZIP_PATH = ROOT / "data/raw/accredreestr.zip"
 OUT_CSV = ROOT / "data/university_registry.csv"
-OUT_JSON = ROOT / "data/university_registry.json"
-META_JSON = ROOT / "data/university_registry.meta.json"
 
 HE_LEVEL_RE = re.compile(
     r"(?i)высшее\s+образование|высшее\s+профессиональное|послевузовское\s+профессиональное"
@@ -143,8 +140,6 @@ def main() -> None:
 
     by_ogrn: dict[str, dict] = {}
     seen = 0
-    kept = 0
-
     for cert in iter_certificates(xml_name):
         seen += 1
         if seen % 5000 == 0:
@@ -156,7 +151,6 @@ def main() -> None:
         prev = by_ogrn.get(key)
         if prev is None or (not prev["domain"] and row["domain"]):
             by_ogrn[key] = row
-            kept += 1
 
     rows = sorted(by_ogrn.values(), key=lambda r: r["official_name"].lower())
     for i, row in enumerate(rows, start=1):
@@ -173,8 +167,6 @@ def main() -> None:
         "aliases",
         "domain",
         "region",
-        "inn",
-        "ogrn",
         "accreditation_status",
         "vk_group_id",
         "vk_screen_name",
@@ -190,23 +182,6 @@ def main() -> None:
             out["aliases"] = "|".join(row["aliases"])
             out["is_pilot"] = "true" if row["is_pilot"] else "false"
             writer.writerow(out)
-
-    OUT_JSON.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
-    META_JSON.write_text(
-        json.dumps(
-            {
-                "source_zip": str(ZIP_PATH),
-                "source_xml": xml_name,
-                "certificates_scanned": seen,
-                "universities_kept": len(rows),
-                "with_domain": sum(1 for r in rows if r["domain"]),
-                "is_pilot_count": sum(1 for r in rows if r["is_pilot"]),
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
 
     print(f"Done: {len(rows)} accredited HE orgs -> {OUT_CSV}")
     print(f"  with domain: {sum(1 for r in rows if r['domain'])}")
