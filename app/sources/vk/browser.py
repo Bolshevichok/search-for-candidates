@@ -223,7 +223,7 @@ class VkMobileMemberSearcher:
         if self.extract_public_contacts:
           try:
             email, phone = self._public_contacts(member.profile_url)
-          except Exception as exc:  # Contacts are optional, matching is not.
+          except Exception as exc: 
             _LOGGER.info("Could not read public contacts on %s: %s", member.profile_url, type(exc).__name__)
         results.append(VkProfileResult(
           task.candidate_id,
@@ -270,7 +270,7 @@ def _search_community(
       extract_public_contacts=extract_public_contacts,
     ) as searcher:
       return searcher.search_community(tasks)
-  except Exception as exc:  # A changed or blocked UI must not abort the batch.
+  except Exception as exc:  
     _LOGGER.warning("VK community scan error for %s: %s", tasks[0].vk_url if tasks else "?", exc)
     return [VkProfileResult(task.candidate_id, task.community_id, None, "error", mobile_members_url(task.vk_url)) for task in tasks]
 

@@ -133,6 +133,72 @@ class Repository:
     self.commit()
     return university_id
 
+  def upsert_vk_community(
+    self,
+    *,
+    university_id: int,
+    vk_group_id: str | None,
+    vk_screen_name: str | None,
+    vk_url: str,
+    kind: str = "primary",
+    verification_source_url: str | None = None,
+    active: bool = True,
+  ) -> int:
+    row = self.execute(
+      "SELECT community_id FROM university_vk_communities WHERE university_id = ? AND vk_url = ?",
+      (university_id, vk_url),
+    ).fetchone()
+    if row:
+      community_id = int(row["community_id"])
+      self.execute(
+        """
+        UPDATE university_vk_communities
+        SET vk_group_id = ?, vk_screen_name = ?, kind = ?, verification_source_url = ?, active = ?
+        WHERE community_id = ?
+        """,
+        (vk_group_id, vk_screen_name, kind, verification_source_url, int(active), community_id),
+      )
+    else:
+      cur = self.execute(
+        """
+        INSERT INTO university_vk_communities
+          (university_id, vk_group_id, vk_screen_name, vk_url, kind, verification_source_url, active)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (university_id, vk_group_id, vk_screen_name, vk_url, kind, verification_source_url, int(active)),
+      )
+      community_id = int(cur.lastrowid)
+    self.commit()
+    return community_id
+
+  def upsert_candidate_vk_profile(self, record: dict[str, Any]) -> None:
+    self.execute(
+      """
+      INSERT INTO candidate_vk_profiles (
+        candidate_id, community_id, profile_url, vk_match_status,
+        public_email, public_phone, evidence_url, checked_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(candidate_id, community_id) DO UPDATE SET
+        profile_url = excluded.profile_url,
+        vk_match_status = excluded.vk_match_status,
+        public_email = excluded.public_email,
+        public_phone = excluded.public_phone,
+        evidence_url = excluded.evidence_url,
+        checked_at = excluded.checked_at
+      """,
+      (
+        record["candidate_id"],
+        record["community_id"],
+        record.get("profile_url"),
+        record["vk_match_status"],
+        record.get("public_email"),
+        record.get("public_phone"),
+        record.get("evidence_url"),
+        record.get("checked_at") or utc_now_iso(),
+      ),
+    )
+    self.commit()
+
   def list_universities(
     self,
     limit: int | None = None,
@@ -285,6 +351,7 @@ class Repository:
 
   def clear_candidates_for_run(self) -> None:
     self.execute("DELETE FROM possible_namesakes")
+    self.execute("DELETE FROM candidate_vk_profiles")
     self.execute("DELETE FROM candidates")
     self.commit()
 
@@ -355,21 +422,6 @@ class Repository:
   def count_table(self, table: str) -> int:
     row = self.execute(f"SELECT COUNT(*) AS c FROM {table}").fetchone()
     return int(row["c"])
-
-  def reset_database(self) -> None:
-    for table in (
-      "possible_namesakes",
-      "university_errors",
-      "processed_universities",
-      "candidates",
-      "employees_raw",
-      "vak_raw",
-      "runs",
-      "universities",
-    ):
-      self.execute(f"DELETE FROM {table}")
-    self.commit()
-
 
 def open_repository(db_path: Path | str = DEFAULT_DB_PATH, init: bool = True) -> Repository:
   repo = Repository(db_path)

@@ -42,6 +42,26 @@ def _org_matches(defend_org: str, official_name: str, aliases: list[str]) -> boo
   return bool(match and match[1] >= 80)
 
 
+def _resolve_defense_university_id(
+  defend_org: str | None,
+  universities: dict[int, Any],
+  cache: dict[str, int | None],
+) -> int | None:
+  normalized = normalize_organization(defend_org or "")
+  if not normalized:
+    return None
+  if normalized in cache:
+    return cache[normalized]
+  matches: list[int] = []
+  for university_id, university in universities.items():
+    aliases = json.loads(university["aliases"] or "[]")
+    if _org_matches(defend_org or "", university["official_name"], aliases):
+      matches.append(university_id)
+  result = matches[0] if len(matches) == 1 else None
+  cache[normalized] = result
+  return result
+
+
 def _fields_conflict(site: dict[str, Any], vak: dict[str, Any]) -> str | None:
   site_rank = _degree_rank(site.get("degree"))
   vak_rank = _degree_rank(vak.get("dissertation_type"))
@@ -102,6 +122,17 @@ def run_match(repo: Repository, run_id: int) -> None:
     int(row["university_id"]): row
     for row in repo.execute("SELECT * FROM universities").fetchall()
   }
+  vk_universities = {
+    university_id: universities[university_id]
+    for university_id in {
+      int(row["university_id"])
+      for row in repo.execute(
+        "SELECT DISTINCT university_id FROM university_vk_communities WHERE active = 1"
+      ).fetchall()
+    }
+    if university_id in universities
+  }
+  defense_org_cache: dict[str, int | None] = {}
 
   vak_by_fio: dict[str, list[Any]] = {}
   for row in vak_rows:
@@ -152,7 +183,9 @@ def run_match(repo: Repository, run_id: int) -> None:
             "full_name": vak["fio"],
             "identity_key": None,
             "match_status": "vak_no_site",
-            "university_id": None,
+            "university_id": _resolve_defense_university_id(
+              vak["defend_org"], vk_universities, defense_org_cache,
+            ),
             "department_id": None,
             "degree": vak["dissertation_type"],
             "disciplines": None,
@@ -226,7 +259,9 @@ def run_match(repo: Repository, run_id: int) -> None:
         "full_name": vak["fio"],
         "identity_key": None,
         "match_status": "vak_no_site",
-        "university_id": None,
+        "university_id": _resolve_defense_university_id(
+          vak["defend_org"], vk_universities, defense_org_cache,
+        ),
         "department_id": None,
         "degree": vak["dissertation_type"],
         "disciplines": None,

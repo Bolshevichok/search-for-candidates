@@ -88,6 +88,32 @@ CREATE TABLE IF NOT EXISTS candidates (
     last_seen_run_id INTEGER NOT NULL REFERENCES runs(run_id)
 );
 
+CREATE TABLE IF NOT EXISTS university_vk_communities (
+    community_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    university_id INTEGER NOT NULL REFERENCES universities(university_id),
+    vk_group_id TEXT,
+    vk_screen_name TEXT,
+    vk_url TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'primary',
+    verification_source_url TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    UNIQUE (university_id, vk_url)
+);
+
+CREATE TABLE IF NOT EXISTS candidate_vk_profiles (
+    candidate_id TEXT NOT NULL REFERENCES candidates(candidate_id),
+    community_id INTEGER NOT NULL REFERENCES university_vk_communities(community_id),
+    profile_url TEXT,
+    vk_match_status TEXT NOT NULL CHECK (
+        vk_match_status IN ('matched', 'ambiguous', 'not_found', 'error')
+    ),
+    public_email TEXT,
+    public_phone TEXT,
+    evidence_url TEXT,
+    checked_at TEXT NOT NULL,
+    PRIMARY KEY (candidate_id, community_id)
+);
+
 CREATE TABLE IF NOT EXISTS possible_namesakes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     site_candidate_id TEXT NOT NULL REFERENCES candidates(candidate_id),
@@ -113,5 +139,7 @@ CREATE TABLE IF NOT EXISTS university_errors (
 
 CREATE INDEX IF NOT EXISTS idx_employees_raw_university ON employees_raw(university_id);
 CREATE INDEX IF NOT EXISTS idx_candidates_match_status ON candidates(match_status);
+CREATE INDEX IF NOT EXISTS idx_vk_communities_university ON university_vk_communities(university_id);
+CREATE INDEX IF NOT EXISTS idx_candidate_vk_profiles_status ON candidate_vk_profiles(vk_match_status);
 CREATE INDEX IF NOT EXISTS idx_processed_universities_run ON processed_universities(run_id);
 CREATE INDEX IF NOT EXISTS idx_vak_raw_fio ON vak_raw(fio_normalized);
