@@ -1,5 +1,3 @@
-"""Load university_registry.csv into the universities table."""
-
 from __future__ import annotations
 
 import csv
@@ -28,7 +26,6 @@ def load_registry(
     reader = csv.DictReader(fh)
     for row in reader:
       domain = (row.get("domain") or "").strip() or None
-      vk_group_id = (row.get("vk_group_id") or "").strip() or None
       is_pilot = str(row.get("is_pilot", "")).strip().lower() in {"1", "true", "yes"}
       repo.upsert_university(
         official_name=row["official_name"].strip(),
@@ -36,7 +33,6 @@ def load_registry(
         domain=domain,
         region=(row.get("region") or "").strip() or None,
         accreditation_status=(row.get("accreditation_status") or "").strip() or None,
-        vk_group_id=vk_group_id,
         is_pilot=is_pilot,
       )
       count += 1

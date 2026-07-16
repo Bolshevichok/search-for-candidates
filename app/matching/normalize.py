@@ -1,5 +1,3 @@
-"""FIO and organization name normalization (candidate-pipeline-architecture.md §4.1)."""
-
 from __future__ import annotations
 
 import re

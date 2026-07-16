@@ -1,54 +1,55 @@
-# search-for-candidates
+# Поиск кандидатов
 
-Batch CLI pipeline: university Layer 1 employees, VAK defenses (list + detail), matcher, xlsx export.
+Консольное приложение собирает сведения о кандидатах
 
-**Architecture:** [research/pipeline/app-architecture.md](research/pipeline/app-architecture.md) (как устроено приложение), [research/pipeline/candidate-pipeline-architecture.md](research/pipeline/candidate-pipeline-architecture.md) (логика данных и матча).
+## Что делает основной запуск
 
-## Pipeline (M1)
+Команда `run` всегда выполняет четыре шага:
 
-```text
-registry CSV
-    ├─ layer1 (/sveden/employees → program pages, parallel per university)
-    └─ vak (list API → parallel detail fetch)     } ingest ∥ until both done
-              ↓
-           match (4 statuses + possible_namesakes)
-              ↓
-           export → site_employees + vak_candidates (+ errors, meta)
-```
+1. Собирает сотрудников с сайтов вузов.
+2. Загружает сведения о защитах из ВАК.
+3. Сопоставляет людей из двух источников.
+4. Создаёт Excel-файл с результатом.
 
-Layer2 contacts and VK are stubbed (`run.layer2` / `run.vk` must stay `false` in this build).
+Поиск контактов кандидатов из вузов проходит после 
 
-## Setup
+## Установка
 
-```bash
-python -m venv .venv
-.venv\Scripts\activate
-pip install -e .
-copy .env.example .env
-```
+Нужен Python 3.12 или новее. Создайте виртуальное окружение проекта, активируйте его и установите зависимости из проекта. Затем скопируйте `.env.example` в `.env`.
 
-## Commands
+Файл `.env` нужен только для Layer 2: при обычном запуске его можно не заполнять.
 
-```bash
+## Основные команды
+
+```powershell
+# Полный основной прогон
 python -m app run
-python -m app run --full
-python -m app step layer1
-python -m app step vak
-python -m app step match
-python -m app export --out output/candidates.xlsx
+
+# Прогон на пяти вузах для быстрой проверки
+python -m app --config config.smoke5.yaml run --out output/smoke5.xlsx
+
+# Проверить состояние рабочей БД
 python -m app status
+
+# Очистить рабочую БД
 python -m app reset
+
+# Создать XLSX из уже собранных данных
+python -m app export --out output/candidates.xlsx
 ```
 
-Configuration: `config.yaml`. Smoke: `config.smoke5.yaml` (5 universities, 15 VAK pages, ~4 min).
+## Обогощение записей контактами
 
-```bash
-python -m app reset
-python -m app --config config.smoke5.yaml run --out output/smoke5.xlsx --full
+Layer 2 ищет электронную почту и телефон кандидатов на сайтах вузов. Для него нужны `YANDEX_FOLDER_ID` и `YANDEX_API_KEY` в `.env`.
+
+```powershell
+python -m app step layer2 --limit 100
 ```
 
-Pass config before the subcommand: `python -m app --config config.yaml run`.
+## Файлы проекта
 
-Data: `data/university_registry.csv` (needs non-empty `domain` for layer1), state in `data/state.sqlite`, exports in `output/`.
-
-See [specs/001-core-pipeline-mvp/quickstart.md](specs/001-core-pipeline-mvp/quickstart.md) for verification steps.
+- `data/university_registry.csv` — реестр вузов; для обработки у вуза должен быть указан домен.
+- `data/state.sqlite` — рабочая БД. Её можно безопасно сбросить и собрать заново.
+- `output/` — готовые XLSX-выгрузки.
+- `config.yaml` — обычные лимиты и задержки.
+- `config.smoke5.yaml` — настройки тестового прогона на пяти вузах.

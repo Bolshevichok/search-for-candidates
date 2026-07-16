@@ -1,5 +1,3 @@
-"""Map VAK API JSON records to vak_raw rows."""
-
 from __future__ import annotations
 
 from typing import Any

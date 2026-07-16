@@ -1,5 +1,3 @@
-"""Match layer1 employees with VAK records (4 statuses + possible_namesakes)."""
-
 from __future__ import annotations
 
 import hashlib
@@ -137,7 +135,6 @@ def run_match(repo: Repository, run_id: int) -> None:
             "full_name": emp["fio"],
             "identity_key": emp["identity_key"],
             "match_status": "site_no_vak",
-            "needs_review": False,
             "university_id": emp["university_id"],
             "department_id": emp["department_id"],
             "degree": emp["degree"],
@@ -155,7 +152,6 @@ def run_match(repo: Repository, run_id: int) -> None:
             "full_name": vak["fio"],
             "identity_key": None,
             "match_status": "vak_no_site",
-            "needs_review": False,
             "university_id": None,
             "department_id": None,
             "degree": vak["dissertation_type"],
@@ -189,7 +185,6 @@ def run_match(repo: Repository, run_id: int) -> None:
           "full_name": emp["fio"],
           "identity_key": emp["identity_key"],
           "match_status": status,
-          "needs_review": False,
           "university_id": emp["university_id"],
           "department_id": emp["department_id"],
           "degree": emp["degree"] or chosen_vak["dissertation_type"],
@@ -209,7 +204,6 @@ def run_match(repo: Repository, run_id: int) -> None:
           "full_name": emp["fio"],
           "identity_key": emp["identity_key"],
           "match_status": "site_no_vak",
-          "needs_review": False,
           "university_id": emp["university_id"],
           "department_id": emp["department_id"],
           "degree": emp["degree"],
@@ -232,7 +226,6 @@ def run_match(repo: Repository, run_id: int) -> None:
         "full_name": vak["fio"],
         "identity_key": None,
         "match_status": "vak_no_site",
-        "needs_review": False,
         "university_id": None,
         "department_id": None,
         "degree": vak["dissertation_type"],
@@ -243,5 +236,3 @@ def run_match(repo: Repository, run_id: int) -> None:
       },
     )
     seq += 1
-
-  repo.mark_step_done(run_id, "match", None)

@@ -1,5 +1,3 @@
-"""Run VAK fetch step with pagination checkpoints."""
-
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -76,17 +74,14 @@ def run_vak(
 ) -> None:
   """Fetch VAK records for both is_pilot branches (FR-004).
 
-  List pages are sequential (checkpoint); detail cards for each page run in parallel.
+  List pages are sequential; detail cards for each page run in parallel.
   """
   with open_repository(db_path, init=False) as repo:
-    start_page = repo.get_vak_checkpoint(run_id) + 1
-
     with HttpClient(request_delay_sec=request_delay_sec, timeout=timeout) as client:
       vak = VakClient(client)
       for is_pilot in (False, True):
-        branch_start = 1 if is_pilot else start_page
         pages_fetched = 0
-        for page, items in vak.iter_pages(is_pilot=is_pilot, start_page=branch_start):
+        for _page, items in vak.iter_pages(is_pilot=is_pilot, start_page=1):
           _upsert_page_details(
             repo,
             items,
@@ -95,13 +90,6 @@ def run_vak(
             timeout=timeout,
             detail_workers=detail_workers,
           )
-          if not is_pilot:
-            repo.mark_step_done(
-              run_id,
-              "vak",
-              None,
-              checkpoint_cursor=page,
-            )
           pages_fetched += 1
           if max_pages is not None and pages_fetched >= max_pages:
             break

@@ -1,4 +1,3 @@
-"""Extract university points from embedded Yandex map on obrnadzor RAOO page."""
 import json
 import re
 from pathlib import Path

@@ -9,7 +9,6 @@ CREATE TABLE IF NOT EXISTS universities (
     domain TEXT UNIQUE,
     region TEXT,
     accreditation_status TEXT,
-    vk_group_id TEXT,
     is_pilot INTEGER NOT NULL DEFAULT 0,
     layer1_status TEXT
 );
@@ -18,8 +17,7 @@ CREATE TABLE IF NOT EXISTS runs (
     run_id INTEGER PRIMARY KEY AUTOINCREMENT,
     started_at TEXT NOT NULL,
     finished_at TEXT,
-    status TEXT NOT NULL CHECK (status IN ('running', 'success', 'failed')),
-    is_full INTEGER NOT NULL DEFAULT 0
+    status TEXT NOT NULL CHECK (status IN ('running', 'success', 'failed'))
 );
 
 CREATE TABLE IF NOT EXISTS employees_raw (
@@ -73,7 +71,6 @@ CREATE TABLE IF NOT EXISTS candidates (
             'site_no_vak'
         )
     ),
-    needs_review INTEGER NOT NULL DEFAULT 0,
     university_id INTEGER REFERENCES universities(university_id),
     department_id TEXT,
     post TEXT,
@@ -88,9 +85,6 @@ CREATE TABLE IF NOT EXISTS candidates (
     phone TEXT,
     contact_type TEXT,
     contact_source_url TEXT,
-    vk_url TEXT,
-    vk_score REAL,
-    vk_status TEXT,
     candidate_content_hash TEXT NOT NULL,
     first_seen_run_id INTEGER NOT NULL REFERENCES runs(run_id),
     last_seen_run_id INTEGER NOT NULL REFERENCES runs(run_id)
@@ -103,16 +97,11 @@ CREATE TABLE IF NOT EXISTS possible_namesakes (
     reason TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS run_steps (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS processed_universities (
     run_id INTEGER NOT NULL REFERENCES runs(run_id),
-    step TEXT NOT NULL CHECK (step IN ('layer1', 'vak', 'match', 'layer2', 'export')),
-    university_id INTEGER REFERENCES universities(university_id),
-    status TEXT NOT NULL CHECK (status IN ('pending', 'done', 'error')),
-    university_site_hash TEXT,
-    checkpoint_cursor INTEGER,
-    error_message TEXT,
-    UNIQUE (run_id, step, university_id)
+    university_id INTEGER NOT NULL REFERENCES universities(university_id),
+    completed_at TEXT NOT NULL,
+    PRIMARY KEY (run_id, university_id)
 );
 
 CREATE TABLE IF NOT EXISTS university_errors (
@@ -126,5 +115,5 @@ CREATE TABLE IF NOT EXISTS university_errors (
 
 CREATE INDEX IF NOT EXISTS idx_employees_raw_university ON employees_raw(university_id);
 CREATE INDEX IF NOT EXISTS idx_candidates_match_status ON candidates(match_status);
-CREATE INDEX IF NOT EXISTS idx_run_steps_run ON run_steps(run_id, step);
+CREATE INDEX IF NOT EXISTS idx_processed_universities_run ON processed_universities(run_id);
 CREATE INDEX IF NOT EXISTS idx_vak_raw_fio ON vak_raw(fio_normalized);

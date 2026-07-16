@@ -1,30 +1,3 @@
-r"""Ручной/интеграционный тест fallback-пути layer2: реальный Crawl4AI +
-реальный YandexGPT, без моков и без БД.
-
-В отличие от старой версии этого файла (которая подменяла Crawl4AICrawler.crawl
-и YandexLLMParser.parse фейковыми функциями и гоняла run_layer2 целиком), этот
-тест дергает fallback-путь напрямую с введёнными ФИО и сайтом, чтобы увидеть,
-что реально возвращает Crawl4AI (HTML) и реально возвращает YandexGPT (JSON с
-контактами) для конкретного человека и конкретного университета.
-
-Строгий путь (/sveden/employees, БД layer1) здесь намеренно не участвует --
-он тестируется отдельно и не требует ни Crawl4AI, ни LLM.
-
-Запуск:
-  & .\.venv\Scripts\Activate.ps1
-
-  # с аргументами:
-  python -m tests.run_layer2_smoke --full-name "Иванов Иван Иванович" --site urfu.ru
-
-  # либо без аргументов -- спросит ФИО и сайт в терминале:
-  python -m tests.run_layer2_smoke
-
-Нужны переменные окружения для реального вызова YandexGPT:
-  YANDEX_FOLDER_ID, YANDEX_API_KEY  (опционально YANDEX_MODEL, YANDEX_BASE_URL)
-Если их нет -- парсер сам откатится на regex-эвристику (см. диагностику ниже),
-это тоже валидный сценарий для проверки.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -68,10 +41,6 @@ async def run(full_name: str, domain: str) -> None:
     candidate_id = "manual_test"
 
     with HttpClient(request_delay_sec=0.0) as client:
-        # --- Этапы 1-2: обход сайта (Crawl4AI, с фоллбэком на HttpClient),
-        # начиная с главной страницы и дальше по внутренним ссылкам,
-        # ранжированным по похожести на страницу сотрудников/контактов,
-        # пока не найдётся страница с упоминанием ФИО ---
         from app.matching.normalize import split_fio_parts
         target_last, target_first, target_patr = split_fio_parts(full_name)
         pattern = layer2._build_loose_name_pattern(target_last, target_first, target_patr)
@@ -93,7 +62,6 @@ async def run(full_name: str, domain: str) -> None:
         print(html[:500].replace("\n", " ") + ("..." if len(html) > 500 else ""))
         print()
 
-        # --- Этап 3: парсинг контактов через YandexGPT (или regex-фоллбэк) ---
         print("=== Этап 3: парсинг контактов (YandexGPT / regex) ===")
         parser = layer2.YandexLLMParser()
         parse_result = await parser.parse(html, full_name, candidate_id)
@@ -101,14 +69,13 @@ async def run(full_name: str, domain: str) -> None:
             print(f"  {key}: {value}")
         print()
 
-        # --- Этап 4: итоговый контракт layer2 (полный fallback-путь целиком) ---
         print("=== Этап 4: итоговый Layer2Contract (полный fallback-путь) ===")
         contract = await layer2.crawl_and_parse_contact(
             candidate_id=candidate_id,
             full_name=full_name,
             university_domain=domain,
             client=client,
-            employees_directory=None,  # форсируем fallback, минуя /sveden/employees
+            employees_directory=None,
         )
         for key, value in contract.to_dict().items():
             print(f"  {key}: {value}")

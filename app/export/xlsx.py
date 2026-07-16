@@ -1,5 +1,3 @@
-"""XLSX export: separate site and VAK sheets."""
-
 from __future__ import annotations
 
 import json
@@ -8,6 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from openpyxl import Workbook
+from openpyxl.comments import Comment
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 from app.db.repository import Repository
 from app.sources.vak.parser import split_specialty
@@ -18,28 +19,36 @@ VAK_STATUSES = frozenset({"vak_no_site", "site_and_vak", "site_and_vak_probable"
 SITE_COLUMNS = [
   "full_name",
   "match_status",
-  "needs_review",
   "university",
-  "department",
   "post",
   "degree",
   "academic_title",
   "disciplines",
-  "gen_experience",
   "spec_experience",
   "email",
   "phone",
   "contact_url",
   "source_url",
-  "vk_url",
-  "vk_score",
-  "vk_status",
+]
+
+SITE_HEADERS = [
+  "ФИО",
+  "Где найден кандидат",
+  "Университет",
+  "Должность",
+  "Учёная степень",
+  "Учёное звание",
+  "Преподаваемые дисциплины",
+  "Стаж по специальности, лет",
+  "Электронная почта",
+  "Телефон",
+  "Страница с контактами",
+  "Страница источника",
 ]
 
 VAK_COLUMNS = [
   "full_name",
   "match_status",
-  "needs_review",
   "branch",
   "specialty_code",
   "specialty_name",
@@ -53,6 +62,73 @@ VAK_COLUMNS = [
   "is_pilot",
 ]
 
+VAK_HEADERS = [
+  "ФИО",
+  "Где найден кандидат",
+  "Отрасль науки",
+  "Код специальности",
+  "Название специальности",
+  "Тип диссертации",
+  "Тема диссертации",
+  "Дата защиты",
+  "Организация защиты",
+  "Шифр совета",
+  "Адрес организации",
+  "Телефон организации",
+  "Порядок присуждения степени",
+]
+
+MATCH_STATUS_LABELS = {
+  "site_and_vak": "Найден на сайте вуза и в ВАК",
+  "site_and_vak_probable": "Вероятно найден на сайте вуза и в ВАК",
+  "vak_no_site": "Найден в ВАК, не найден на сайте вуза",
+  "site_no_vak": "Найден на сайте вуза, не найден в ВАК",
+}
+
+HEADER_NOTES = {
+  "Где найден кандидат": (
+    "Показывает, в каком источнике найдена запись: на сайте вуза, в базе ВАК или в обоих."
+  ),
+  "Порядок присуждения степени": (
+    "Самостоятельное присуждение — степень присуждена вузом или научной организацией, "
+    "которые имеют такое право. Защита через диссертационный совет ВАК — обычный порядок защиты."
+  ),
+}
+
+_HEADER_FILL = PatternFill("solid", fgColor="1F4E78")
+_HEADER_FONT = Font(color="FFFFFF", bold=True)
+_HEADER_ALIGNMENT = Alignment(horizontal="center", vertical="center", wrap_text=True)
+_CELL_ALIGNMENT = Alignment(vertical="top", wrap_text=True)
+_MAX_COLUMN_WIDTH = 50
+_MIN_COLUMN_WIDTH = 12
+
+
+def _format_sheet(ws: Any) -> None:
+  """Make an exported sheet readable without manual Excel adjustments."""
+  ws.freeze_panes = "A2"
+  ws.auto_filter.ref = ws.dimensions
+  ws.row_dimensions[1].height = 32
+
+  for cell in ws[1]:
+    cell.fill = _HEADER_FILL
+    cell.font = _HEADER_FONT
+    cell.alignment = _HEADER_ALIGNMENT
+    if cell.value in HEADER_NOTES:
+      cell.comment = Comment(HEADER_NOTES[cell.value], "Поиск кандидатов")
+
+  for row in ws.iter_rows(min_row=2):
+    for cell in row:
+      cell.alignment = _CELL_ALIGNMENT
+
+  for column_cells in ws.iter_cols():
+    width = max(
+      (len(str(cell.value)) for cell in column_cells if cell.value is not None),
+      default=0,
+    )
+    ws.column_dimensions[get_column_letter(column_cells[0].column)].width = min(
+      max(width + 2, _MIN_COLUMN_WIDTH), _MAX_COLUMN_WIDTH
+    )
+
 
 def _latest_defense(defenses_json: str | None) -> dict[str, Any]:
   if not defenses_json:
@@ -61,6 +137,23 @@ def _latest_defense(defenses_json: str | None) -> dict[str, Any]:
   if not items:
     return {}
   return max(items, key=lambda d: d.get("date") or "")
+
+
+def _format_duration(started_at: str, finished_at: str) -> str:
+  seconds = max(0, int((datetime.fromisoformat(finished_at) - datetime.fromisoformat(started_at)).total_seconds()))
+  hours, seconds = divmod(seconds, 3600)
+  minutes, seconds = divmod(seconds, 60)
+  return f"{hours:02}:{minutes:02}:{seconds:02}"
+
+
+def _match_status_label(status: str) -> str:
+  return MATCH_STATUS_LABELS.get(status, status)
+
+
+def _degree_award_process(value: Any) -> str:
+  if value:
+    return "Самостоятельное присуждение степени вузом"
+  return "Защита через диссертационный совет ВАК"
 
 
 def _defense_fields(defense: dict[str, Any]) -> dict[str, Any]:
@@ -89,11 +182,11 @@ def export_xlsx(repo: Repository, output_path: Path, domain: str | None = None) 
   wb = Workbook()
 
   ws_site = wb.active
-  ws_site.title = "site_employees"
-  ws_site.append(SITE_COLUMNS)
+  ws_site.title = "Сотрудники вузов"
+  ws_site.append(SITE_HEADERS)
 
-  ws_vak = wb.create_sheet("vak_candidates")
-  ws_vak.append(VAK_COLUMNS)
+  ws_vak = wb.create_sheet("Кандидаты ВАК")
+  ws_vak.append(VAK_HEADERS)
 
   universities = {
     int(row["university_id"]): row
@@ -118,23 +211,17 @@ def export_xlsx(repo: Repository, output_path: Path, domain: str | None = None) 
       ws_site.append(
         [
           row["full_name"],
-          status,
-          bool(row["needs_review"]),
+          _match_status_label(status),
           uni["official_name"] if uni else "",
-          row["department_id"] or "",
           row["post"] or "",
           row["degree"] or "",
           row["academic_title"] or "",
           "; ".join(disciplines),
-          row["gen_experience"] if row["gen_experience"] is not None else "",
           row["spec_experience"] if row["spec_experience"] is not None else "",
           row["email"] or "",
           row["phone"] or "",
           row["contact_source_url"] or "",
           row["source_url"] or "",
-          row["vk_url"] or "",
-          row["vk_score"] if row["vk_score"] is not None else "",
-          row["vk_status"] or "",
         ]
       )
 
@@ -142,8 +229,7 @@ def export_xlsx(repo: Repository, output_path: Path, domain: str | None = None) 
       ws_vak.append(
         [
           row["full_name"],
-          status,
-          bool(row["needs_review"]),
+          _match_status_label(status),
           vak_fields["branch"],
           vak_fields["specialty_code"],
           vak_fields["specialty_name"],
@@ -154,13 +240,19 @@ def export_xlsx(repo: Repository, output_path: Path, domain: str | None = None) 
           vak_fields["council_cipher"],
           vak_fields["org_address"],
           vak_fields["org_phone"],
-          vak_fields["is_pilot"],
+          _degree_award_process(vak_fields["is_pilot"]),
         ]
       )
 
-  ws_namesakes = wb.create_sheet("possible_namesakes")
+  ws_namesakes = wb.create_sheet("Возможные тёзки")
   ws_namesakes.append(
-    ["site_full_name", "site_university", "vak_full_name", "vak_defend_org", "reason"]
+    [
+      "ФИО на сайте вуза",
+      "Университет",
+      "ФИО в базе ВАК",
+      "Организация защиты",
+      "Причина проверки",
+    ]
   )
   for row in repo.execute(
     """
@@ -185,8 +277,8 @@ def export_xlsx(repo: Repository, output_path: Path, domain: str | None = None) 
       ]
     )
 
-  ws_errors = wb.create_sheet("university_errors")
-  ws_errors.append(["university", "domain", "error_type", "last_attempt_at"])
+  ws_errors = wb.create_sheet("Ошибки вузов")
+  ws_errors.append(["Университет", "Домен", "Тип ошибки", "Последняя попытка"])
   for row in repo.execute(
     """
     SELECT u.official_name, u.domain, ue.error_type, ue.last_attempt_at
@@ -199,24 +291,25 @@ def export_xlsx(repo: Repository, output_path: Path, domain: str | None = None) 
       [row["official_name"], row["domain"] or "", row["error_type"], row["last_attempt_at"]]
     )
 
-  ws_meta = wb.create_sheet("run_meta")
+  ws_meta = wb.create_sheet("Сведения о выгрузке")
   ws_meta.append(
     [
-      "run_id",
-      "started_at",
-      "finished_at",
-      "universities_ok",
-      "universities_error",
-      "candidates_total",
-      "site_and_vak",
-      "site_and_vak_probable",
-      "vak_no_site",
-      "site_no_vak",
-      "is_full_run",
+      "ID запуска",
+      "Начало",
+      "Окончание",
+      "Длительность",
+      "Вузов обработано успешно",
+      "Вузов с ошибками",
+      "Всего кандидатов",
+      "Есть на сайте и в ВАК",
+      "Вероятно есть на сайте и в ВАК",
+      "Есть в ВАК, нет на сайте",
+      "Есть на сайте, нет в ВАК",
     ]
   )
   run = repo.execute("SELECT * FROM runs ORDER BY run_id DESC LIMIT 1").fetchone()
   if run:
+    finished_at = run["finished_at"] or datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     ok = repo.execute(
       "SELECT COUNT(*) AS c FROM universities WHERE layer1_status = 'ok'"
     ).fetchone()["c"]
@@ -235,7 +328,8 @@ def export_xlsx(repo: Repository, output_path: Path, domain: str | None = None) 
       [
         run["run_id"],
         run["started_at"],
-        run["finished_at"] or "",
+        finished_at,
+        _format_duration(run["started_at"], finished_at),
         ok,
         err,
         total,
@@ -243,9 +337,11 @@ def export_xlsx(repo: Repository, output_path: Path, domain: str | None = None) 
         counts.get("site_and_vak_probable", 0),
         counts.get("vak_no_site", 0),
         counts.get("site_no_vak", 0),
-        bool(run["is_full"]),
       ]
     )
+
+  for worksheet in wb.worksheets:
+    _format_sheet(worksheet)
 
   wb.save(output_path)
   return output_path

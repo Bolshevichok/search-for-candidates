@@ -1,4 +1,3 @@
-"""Download official accred registry ZIP from ISGA (Rosobrnadzor)."""
 import urllib.request
 from pathlib import Path
 

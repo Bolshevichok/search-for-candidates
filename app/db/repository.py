@@ -1,9 +1,6 @@
-"""SQLite persistence, checkpoints, and backup helpers."""
-
 from __future__ import annotations
 
 import json
-import shutil
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,8 +8,6 @@ from typing import Any
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 DEFAULT_DB_PATH = Path("data/state.sqlite")
-DEFAULT_BACKUP_DIR = Path("data/backups")
-MAX_BACKUPS = 5
 
 
 def utc_now_iso() -> str:
@@ -41,82 +36,7 @@ class Repository:
   def init_schema(self) -> None:
     ddl = SCHEMA_PATH.read_text(encoding="utf-8")
     self.conn.executescript(ddl)
-    self._migrate_vak_raw()
-    self._migrate_employees_raw()
-    self._migrate_candidates()
-    self._migrate_run_steps()
     self.conn.commit()
-
-  def _migrate_employees_raw(self) -> None:
-    existing = {row["name"] for row in self.execute("PRAGMA table_info(employees_raw)")}
-    for col, col_type in (
-      ("teaching_level", "TEXT"),
-      ("employee_qualification", "TEXT"),
-      ("prof_development", "TEXT"),
-      ("teaching_op", "TEXT"),
-      ("email", "TEXT"),
-      ("phone", "TEXT"),
-    ):
-      if col not in existing:
-        self.execute(f"ALTER TABLE employees_raw ADD COLUMN {col} {col_type}")
-
-  def _migrate_candidates(self) -> None:
-    existing = {row["name"] for row in self.execute("PRAGMA table_info(candidates)")}
-    for col, col_type in (
-      ("post", "TEXT"),
-      ("academic_title", "TEXT"),
-      ("gen_experience", "INTEGER"),
-      ("spec_experience", "INTEGER"),
-      ("source_url", "TEXT"),
-    ):
-      if col not in existing:
-        self.execute(f"ALTER TABLE candidates ADD COLUMN {col} {col_type}")
-
-  def _migrate_vak_raw(self) -> None:
-    existing = {row["name"] for row in self.execute("PRAGMA table_info(vak_raw)")}
-    for col, col_type in (
-      ("council_cipher", "TEXT"),
-      ("org_address", "TEXT"),
-      ("org_phone", "TEXT"),
-    ):
-      if col not in existing:
-        self.execute(f"ALTER TABLE vak_raw ADD COLUMN {col} {col_type}")
-
-  def _migrate_run_steps(self) -> None:
-    """Older DB files were created with `step IN ('layer1','vak','match',
-    'export')` -- missing 'layer2', which run_layer2() now writes via
-    mark_step_done(). SQLite can't ALTER a CHECK constraint, so if the
-    existing table's own CREATE statement doesn't mention 'layer2', rebuild
-    it under the current (wider) constraint and copy the rows over."""
-    row = self.execute(
-      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'run_steps'"
-    ).fetchone()
-    if row is None or "layer2" in (row["sql"] or ""):
-      return  # table doesn't exist yet (fresh DB, schema.sql above already
-      # created it with 'layer2') or already migrated
-    self.conn.executescript(
-      """
-      ALTER TABLE run_steps RENAME TO run_steps_old;
-      CREATE TABLE run_steps (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          run_id INTEGER NOT NULL REFERENCES runs(run_id),
-          step TEXT NOT NULL CHECK (step IN ('layer1', 'vak', 'match', 'layer2', 'export')),
-          university_id INTEGER REFERENCES universities(university_id),
-          status TEXT NOT NULL CHECK (status IN ('pending', 'done', 'error')),
-          university_site_hash TEXT,
-          checkpoint_cursor INTEGER,
-          error_message TEXT,
-          UNIQUE (run_id, step, university_id)
-      );
-      INSERT INTO run_steps (id, run_id, step, university_id, status,
-                              university_site_hash, checkpoint_cursor, error_message)
-        SELECT id, run_id, step, university_id, status,
-               university_site_hash, checkpoint_cursor, error_message
-        FROM run_steps_old;
-      DROP TABLE run_steps_old;
-      CREATE INDEX IF NOT EXISTS idx_run_steps_run ON run_steps(run_id, step);
-      """
-    )
 
   def execute(self, sql: str, params: tuple[Any, ...] | list[Any] = ()) -> sqlite3.Cursor:
     return self.conn.execute(sql, params)
@@ -124,10 +44,10 @@ class Repository:
   def commit(self) -> None:
     self.conn.commit()
 
-  def create_run(self, is_full: bool = False) -> int:
+  def create_run(self) -> int:
     cur = self.execute(
-      "INSERT INTO runs (started_at, status, is_full) VALUES (?, 'running', ?)",
-      (utc_now_iso(), int(is_full)),
+      "INSERT INTO runs (started_at, status) VALUES (?, 'running')",
+      (utc_now_iso(),),
     )
     self.commit()
     return int(cur.lastrowid)
@@ -146,63 +66,23 @@ class Repository:
     ).fetchone()
     return int(row["run_id"]) if row else None
 
-  def mark_step_done(
-    self,
-    run_id: int,
-    step: str,
-    university_id: int | None = None,
-    *,
-    university_site_hash: str | None = None,
-    checkpoint_cursor: int | None = None,
-  ) -> None:
+  def mark_university_processed(self, run_id: int, university_id: int) -> None:
     self.execute(
       """
-      INSERT INTO run_steps (run_id, step, university_id, status, university_site_hash, checkpoint_cursor)
-      VALUES (?, ?, ?, 'done', ?, ?)
-      ON CONFLICT(run_id, step, university_id) DO UPDATE SET
-        status = 'done',
-        university_site_hash = COALESCE(excluded.university_site_hash, run_steps.university_site_hash),
-        checkpoint_cursor = COALESCE(excluded.checkpoint_cursor, run_steps.checkpoint_cursor),
-        error_message = NULL
+      INSERT INTO processed_universities (run_id, university_id, completed_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(run_id, university_id) DO UPDATE SET completed_at = excluded.completed_at
       """,
-      (run_id, step, university_id, university_site_hash, checkpoint_cursor),
+      (run_id, university_id, utc_now_iso()),
     )
     self.commit()
 
-  def mark_step_error(
-    self,
-    run_id: int,
-    step: str,
-    university_id: int | None,
-    message: str,
-  ) -> None:
-    self.execute(
-      """
-      INSERT INTO run_steps (run_id, step, university_id, status, error_message)
-      VALUES (?, ?, ?, 'error', ?)
-      ON CONFLICT(run_id, step, university_id) DO UPDATE SET
-        status = 'error',
-        error_message = excluded.error_message
-      """,
-      (run_id, step, university_id, message),
-    )
-    self.commit()
-
-  def get_done_university_ids(self, run_id: int, step: str = "layer1") -> set[int]:
+  def get_processed_university_ids(self, run_id: int) -> set[int]:
     rows = self.execute(
-      "SELECT university_id FROM run_steps WHERE run_id = ? AND step = ? AND status = 'done' "
-      "AND university_id IS NOT NULL",
-      (run_id, step),
+      "SELECT university_id FROM processed_universities WHERE run_id = ?",
+      (run_id,),
     ).fetchall()
     return {int(r["university_id"]) for r in rows}
-
-  def get_vak_checkpoint(self, run_id: int) -> int:
-    row = self.execute(
-      "SELECT checkpoint_cursor FROM run_steps WHERE run_id = ? AND step = 'vak' "
-      "AND university_id IS NULL AND status = 'done' ORDER BY id DESC LIMIT 1",
-      (run_id,),
-    ).fetchone()
-    return int(row["checkpoint_cursor"]) if row and row["checkpoint_cursor"] is not None else 0
 
   def upsert_university(
     self,
@@ -212,7 +92,6 @@ class Repository:
     domain: str | None,
     region: str | None,
     accreditation_status: str | None,
-    vk_group_id: str | None,
     is_pilot: bool,
   ) -> int:
     aliases_json = json.dumps(aliases or [], ensure_ascii=False)
@@ -222,8 +101,7 @@ class Repository:
       self.execute(
         """
         UPDATE universities SET
-          official_name = ?, aliases = ?, region = ?, accreditation_status = ?,
-          vk_group_id = ?, is_pilot = ?
+          official_name = ?, aliases = ?, region = ?, accreditation_status = ?, is_pilot = ?
         WHERE university_id = ?
         """,
         (
@@ -231,7 +109,6 @@ class Repository:
           aliases_json,
           region,
           accreditation_status,
-          vk_group_id,
           int(is_pilot),
           university_id,
         ),
@@ -240,8 +117,8 @@ class Repository:
       cur = self.execute(
         """
         INSERT INTO universities
-          (official_name, aliases, domain, region, accreditation_status, vk_group_id, is_pilot)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+          (official_name, aliases, domain, region, accreditation_status, is_pilot)
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
         (
           official_name,
@@ -249,7 +126,6 @@ class Repository:
           domain,
           region,
           accreditation_status,
-          vk_group_id,
           int(is_pilot),
         ),
       )
@@ -257,7 +133,11 @@ class Repository:
     self.commit()
     return university_id
 
-  def list_universities(self, limit: int | None = None, domain: str | None = None) -> list[sqlite3.Row]:
+  def list_universities(
+    self,
+    limit: int | None = None,
+    domain: str | None = None,
+  ) -> list[sqlite3.Row]:
     sql = "SELECT * FROM universities"
     params: list[Any] = []
     if domain is not None:
@@ -266,7 +146,7 @@ class Repository:
     sql += " ORDER BY university_id"
     if limit is not None:
       sql += f" LIMIT {int(limit)}"
-    return list(self.execute(sql, tuple(params)).fetchall())
+    return list(self.execute(sql, params).fetchall())
 
   def set_university_layer1_status(self, university_id: int, status: str) -> None:
     self.execute(
@@ -307,7 +187,6 @@ class Repository:
           department_raw = ?, department_id = ?, disciplines = ?,
           gen_experience = ?, spec_experience = ?,
           teaching_level = ?, employee_qualification = ?, prof_development = ?, teaching_op = ?,
-          email = COALESCE(?, email), phone = COALESCE(?, phone),
           source_url = ?
         WHERE employee_id = ?
         """,
@@ -326,8 +205,6 @@ class Repository:
           record.get("employee_qualification"),
           record.get("prof_development"),
           record.get("teaching_op"),
-          record.get("email"),
-          record.get("phone"),
           record["source_url"],
           existing["employee_id"],
         ),
@@ -339,8 +216,8 @@ class Repository:
           university_id, fio, fio_normalized, post, degree, academic_title,
           department_raw, department_id, disciplines, gen_experience, spec_experience,
           teaching_level, employee_qualification, prof_development, teaching_op,
-          email, phone, identity_key, source_url
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          identity_key, source_url
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
           record["university_id"],
@@ -358,30 +235,11 @@ class Repository:
           record.get("employee_qualification"),
           record.get("prof_development"),
           record.get("teaching_op"),
-          record.get("email"),
-          record.get("phone"),
           record["identity_key"],
           record["source_url"],
         ),
       )
     self.commit()
-
-  def get_employees_for_university(self, university_id: int) -> list[dict[str, Any]]:
-    """Read back layer1's already-parsed /sveden/employees rows for this
-    university, so layer2 can match contacts without re-fetching the page."""
-    rows = self.execute(
-      "SELECT fio, fio_normalized, post, email, phone, source_url "
-      "FROM employees_raw WHERE university_id = ?",
-      (university_id,),
-    ).fetchall()
-    return [dict(row) for row in rows]
-
-  def get_university_layer1_status(self, university_id: int) -> str | None:
-    row = self.execute(
-      "SELECT layer1_status FROM universities WHERE university_id = ?",
-      (university_id,),
-    ).fetchone()
-    return row["layer1_status"] if row else None
 
   def upsert_vak_record(self, record: dict[str, Any]) -> None:
     self.execute(
@@ -434,18 +292,16 @@ class Repository:
     self.execute(
       """
       INSERT INTO candidates (
-        candidate_id, full_name, identity_key, match_status, needs_review,
+        candidate_id, full_name, identity_key, match_status,
         university_id, department_id, post, degree, academic_title, disciplines,
         gen_experience, spec_experience, source_url, defenses,
-        email, phone, contact_type, contact_source_url,
-        vk_url, vk_score, vk_status, candidate_content_hash,
+        email, phone, contact_type, contact_source_url, candidate_content_hash,
         first_seen_run_id, last_seen_run_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?)
       ON CONFLICT(candidate_id) DO UPDATE SET
         full_name = excluded.full_name,
         identity_key = excluded.identity_key,
         match_status = excluded.match_status,
-        needs_review = excluded.needs_review,
         university_id = excluded.university_id,
         department_id = excluded.department_id,
         post = excluded.post,
@@ -464,7 +320,6 @@ class Repository:
         record["full_name"],
         record.get("identity_key"),
         record["match_status"],
-        int(record.get("needs_review", False)),
         record.get("university_id"),
         record.get("department_id"),
         record.get("post"),
@@ -495,10 +350,6 @@ class Repository:
       """,
       (site_candidate_id, vak_candidate_id, reason),
     )
-    self.execute(
-      "UPDATE candidates SET needs_review = 1 WHERE candidate_id IN (?, ?)",
-      (site_candidate_id, vak_candidate_id),
-    )
     self.commit()
 
   def count_table(self, table: str) -> int:
@@ -509,7 +360,7 @@ class Repository:
     for table in (
       "possible_namesakes",
       "university_errors",
-      "run_steps",
+      "processed_universities",
       "candidates",
       "employees_raw",
       "vak_raw",
@@ -525,24 +376,3 @@ def open_repository(db_path: Path | str = DEFAULT_DB_PATH, init: bool = True) ->
   if init:
     repo.init_schema()
   return repo
-
-
-def backup_state(
-  reason: str,
-  *,
-  db_path: Path | str = DEFAULT_DB_PATH,
-  backup_dir: Path | str = DEFAULT_BACKUP_DIR,
-  max_backups: int = MAX_BACKUPS,
-) -> Path | None:
-  src = Path(db_path)
-  if not src.exists():
-    return None
-  dest_dir = Path(backup_dir)
-  dest_dir.mkdir(parents=True, exist_ok=True)
-  stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-  dest = dest_dir / f"state_{reason}_{stamp}.sqlite"
-  shutil.copy2(src, dest)
-  backups = sorted(dest_dir.glob("state_*.sqlite"), key=lambda p: p.stat().st_mtime, reverse=True)
-  for old in backups[max_backups:]:
-    old.unlink(missing_ok=True)
-  return dest

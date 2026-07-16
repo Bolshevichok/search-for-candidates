@@ -1,10 +1,3 @@
-run:
-  layer1: true
-  vak: true
-  match: true
-  layer2: false
-  vk: false
-
 limits:
   request_delay_sec: 1.5
   max_universities: null
