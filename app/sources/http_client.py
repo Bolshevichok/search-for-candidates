@@ -28,17 +28,6 @@ def _default_ssl_context(verify_ssl: bool) -> ssl.SSLContext:
 
 
 def _legacy_ssl_context(verify_ssl: bool) -> ssl.SSLContext:
-  """Fallback for genuinely old servers (old Apache/OpenSSL on some RU
-  university sites) that do unsafe legacy TLS renegotiation, which
-  OpenSSL 3.x refuses by default -- surfacing as
-  `ConnectError: [SSL: UNEXPECTED_EOF_WHILE_READING]`.
-
-  Deliberately NOT the default: lowering the cipher security level also
-  makes the TLS ClientHello fingerprint (JA3) less browser-like, which
-  trips anti-bot protection on modern sites (e.g. Qrator-fronted
-  gov/edu APIs) that otherwise connect fine with a normal context. Only
-  used as a second attempt after a plain handshake fails.
-  """
   ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
   ctx.check_hostname = False
   ctx.verify_mode = ssl.CERT_NONE
