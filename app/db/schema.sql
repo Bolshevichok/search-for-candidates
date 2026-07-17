@@ -18,6 +18,22 @@ CREATE TABLE IF NOT EXISTS runs (
     status TEXT NOT NULL CHECK (status IN ('running', 'success', 'failed'))
 );
 
+CREATE TABLE IF NOT EXISTS pipeline_jobs (
+    run_id INTEGER PRIMARY KEY REFERENCES runs(run_id),
+    status TEXT NOT NULL CHECK (
+        status IN (
+            'queued', 'ingest', 'match', 'vk', 'export',
+            'cancelling', 'success', 'cancelled', 'failed', 'interrupted'
+        )
+    ),
+    config_json TEXT NOT NULL,
+    output_path TEXT NOT NULL,
+    error_message TEXT,
+    cancel_requested_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS employees_raw (
     employee_id INTEGER PRIMARY KEY AUTOINCREMENT,
     university_id INTEGER NOT NULL REFERENCES universities(university_id),
@@ -143,3 +159,4 @@ CREATE INDEX IF NOT EXISTS idx_vk_communities_university ON university_vk_commun
 CREATE INDEX IF NOT EXISTS idx_candidate_vk_profiles_status ON candidate_vk_profiles(vk_match_status);
 CREATE INDEX IF NOT EXISTS idx_processed_universities_run ON processed_universities(run_id);
 CREATE INDEX IF NOT EXISTS idx_vak_raw_fio ON vak_raw(fio_normalized);
+CREATE INDEX IF NOT EXISTS idx_pipeline_jobs_status ON pipeline_jobs(status);

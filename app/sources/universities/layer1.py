@@ -13,6 +13,7 @@ from app.db.repository import Repository, open_repository
 from app.matching.employee_merge import dedupe_employees
 from app.matching.identity_key import build_identity_key
 from app.matching.normalize import normalize_fio
+from app.pipeline.cancellation import CancellationToken, PipelineCancelled
 from app.sources.http_client import HttpClient
 from app.sources.universities.struct import DepartmentResolver
 
@@ -147,8 +148,11 @@ class Layer1Runner:
   client: HttpClient
   resolver: DepartmentResolver
   run_id: int
+  cancel_token: CancellationToken | None = None
 
   def process_university(self, uni: Any) -> None:
+    if self.cancel_token is not None:
+      self.cancel_token.check()
     university_id = int(uni["university_id"])
     domain = uni["domain"]
     if not domain:
@@ -178,6 +182,8 @@ class Layer1Runner:
 
     parsed: list[dict[str, Any]] = []
     for link in program_links:
+      if self.cancel_token is not None:
+        self.cancel_token.check()
       page = self.client.get(link)
       if page.status_code != 200:
         continue
@@ -189,6 +195,8 @@ class Layer1Runner:
 
     enriched: list[dict[str, Any]] = []
     for record in parsed:
+      if self.cancel_token is not None:
+        self.cancel_token.check()
       dept_id = self.resolver.resolve(university_id, domain, record.get("department_raw"))
       record["university_id"] = university_id
       record["department_id"] = dept_id
@@ -213,6 +221,8 @@ class Layer1Runner:
       )
     else:
       for record in aggregated:
+        if self.cancel_token is not None:
+          self.cancel_token.check()
         self.repo.upsert_employee(record)
       self.repo.set_university_layer1_status(university_id, "ok")
 
@@ -235,14 +245,23 @@ def _run_one_university(
   run_id: int,
   uni: Any,
   request_delay_sec: float,
+  cancel_token: CancellationToken | None,
 ) -> None:
   university_id = int(uni["university_id"])
   try:
-    with HttpClient(request_delay_sec=request_delay_sec, timeout=15.0) as client:
+    if cancel_token is not None:
+      cancel_token.check()
+    with HttpClient(
+      request_delay_sec=request_delay_sec, timeout=15.0, cancel_token=cancel_token,
+    ) as client:
       with open_repository(db_path, init=False) as repo:
         resolver = DepartmentResolver(client=client)
-        runner = Layer1Runner(repo=repo, client=client, resolver=resolver, run_id=run_id)
+        runner = Layer1Runner(
+          repo=repo, client=client, resolver=resolver, run_id=run_id, cancel_token=cancel_token,
+        )
         runner.process_university(uni)
+  except PipelineCancelled:
+    raise
   except Exception as exc:
     with open_repository(db_path, init=False) as repo:
       _record_university_failure(repo, run_id, university_id, exc)
@@ -256,6 +275,7 @@ def run_layer1(
   max_universities: int | None = None,
   workers: int = 4,
   domain: str | None = None,
+  cancel_token: CancellationToken | None = None,
 ) -> None:
   with open_repository(db_path, init=False) as repo:
     done = repo.get_processed_university_ids(run_id)
@@ -269,23 +289,41 @@ def run_layer1(
     return
 
   if workers <= 1 or len(universities) == 1:
-    with HttpClient(request_delay_sec=request_delay_sec, timeout=15.0) as client:
+    with HttpClient(
+      request_delay_sec=request_delay_sec, timeout=15.0, cancel_token=cancel_token,
+    ) as client:
       with open_repository(db_path, init=False) as repo:
         resolver = DepartmentResolver(client=client)
-        runner = Layer1Runner(repo=repo, client=client, resolver=resolver, run_id=run_id)
+        runner = Layer1Runner(
+          repo=repo, client=client, resolver=resolver, run_id=run_id, cancel_token=cancel_token,
+        )
         for uni in universities:
+          if cancel_token is not None:
+            cancel_token.check()
           university_id = int(uni["university_id"])
           try:
             runner.process_university(uni)
+          except PipelineCancelled:
+            raise
           except Exception as exc:
             _record_university_failure(repo, run_id, university_id, exc)
     return
 
   pool_workers = min(workers, len(universities))
   with ThreadPoolExecutor(max_workers=pool_workers) as pool:
-    futures = [
-      pool.submit(_run_one_university, db_path, run_id, uni, request_delay_sec)
-      for uni in universities
-    ]
-    for future in as_completed(futures):
-      future.result()
+    futures = []
+    try:
+      for uni in universities:
+        if cancel_token is not None:
+          cancel_token.check()
+        futures.append(pool.submit(
+          _run_one_university, db_path, run_id, uni, request_delay_sec, cancel_token,
+        ))
+      for future in as_completed(futures):
+        future.result()
+        if cancel_token is not None:
+          cancel_token.check()
+    except PipelineCancelled:
+      for future in futures:
+        future.cancel()
+      raise

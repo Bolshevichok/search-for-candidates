@@ -8,7 +8,7 @@ from app.config import load_config
 from app.db.repository import DEFAULT_DB_PATH, open_repository
 from app.export.xlsx import default_output_path, export_xlsx
 from app.matching.matcher import run_match
-from app.pipeline.ingest import run_ingest
+from app.pipeline.run import run_full_pipeline
 from app.registry.loader import load_registry
 from app.sources.universities.layer1 import run_layer1
 from app.sources.universities.layer2 import run_layer2
@@ -35,20 +35,20 @@ def cmd_run(args: argparse.Namespace) -> int:
   cfg = load_config(args.config)
   with open_repository(args.db) as repo:
     run_id = _prepare_run(repo)
-    run_ingest(run_id, cfg.limits, db_path=args.db, domain=args.domain)
-    run_match(repo, run_id)
-    if cfg.limits.vk_enabled:
-      run_vk(
-        args.db,
-        run_id,
-        request_delay_sec=cfg.limits.vk_request_delay_sec,
-        workers=cfg.limits.vk_workers,
-        domain=args.domain,
-        limit=cfg.limits.vk_limit,
-        extract_public_contacts=cfg.limits.vk_extract_public_contacts,
-      )
     out = Path(args.out) if args.out else default_output_path()
-    export_xlsx(repo, out, domain=args.domain)
+  try:
+    run_full_pipeline(
+      run_id,
+      cfg.limits,
+      db_path=args.db,
+      output_path=out,
+      domain=args.domain,
+    )
+  except Exception:
+    with open_repository(args.db, init=False) as repo:
+      repo.finish_run(run_id, "failed")
+    raise
+  with open_repository(args.db, init=False) as repo:
     repo.finish_run(run_id, "success")
     print(f"Run {run_id} completed. Export: {out}")
   return 0

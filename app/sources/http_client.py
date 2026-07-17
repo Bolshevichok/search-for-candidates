@@ -7,6 +7,8 @@ from typing import Any
 import httpx
 from tenacity import Retrying, retry_if_exception_type, retry_if_result, stop_after_attempt, wait_exponential
 
+from app.pipeline.cancellation import CancellationToken
+
 _RETRYABLE_EXCEPTIONS = (httpx.TimeoutException, httpx.NetworkError, httpx.TransportError)
 
 _BROWSER_HEADERS = {
@@ -55,10 +57,12 @@ class HttpClient:
     timeout: float = 10.0,
     request_delay_sec: float = 0.0,
     verify_ssl: bool = False,
+    cancel_token: CancellationToken | None = None,
   ) -> None:
     self.timeout = timeout
     self.request_delay_sec = request_delay_sec
     self.verify_ssl = verify_ssl
+    self.cancel_token = cancel_token
     self._client = self._build_client(_default_ssl_context(verify_ssl))
     self._legacy_client: httpx.Client | None = None
     self._retrying = Retrying(
@@ -97,8 +101,15 @@ class HttpClient:
 
     def send() -> httpx.Response:
       nonlocal legacy_client
+      if self.cancel_token is not None:
+        self.cancel_token.check()
       if self.request_delay_sec > 0:
-        time.sleep(self.request_delay_sec)
+        if self.cancel_token is not None:
+          self.cancel_token.wait(self.request_delay_sec)
+        else:
+          time.sleep(self.request_delay_sec)
+      if self.cancel_token is not None:
+        self.cancel_token.check()
       try:
         return (legacy_client or self._client).request(method, url, **kwargs)
       except (httpx.TimeoutException, httpx.NetworkError, httpx.TransportError) as exc:

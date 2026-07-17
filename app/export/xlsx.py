@@ -11,6 +11,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from app.db.repository import Repository
+from app.pipeline.cancellation import CancellationToken
 from app.sources.vak.parser import split_specialty
 
 SITE_STATUSES = frozenset({"site_no_vak", "site_and_vak", "site_and_vak_probable"})
@@ -210,8 +211,17 @@ def _best_vk_profile(repo: Repository, candidate_id: str) -> dict[str, Any]:
   return profile
 
 
-def export_xlsx(repo: Repository, output_path: Path, domain: str | None = None) -> Path:
+def export_xlsx(
+  repo: Repository,
+  output_path: Path,
+  domain: str | None = None,
+  *,
+  cancel_token: CancellationToken | None = None,
+) -> Path:
+  if cancel_token is not None:
+    cancel_token.check()
   output_path.parent.mkdir(parents=True, exist_ok=True)
+  partial_path = output_path.with_name(f".{output_path.name}.partial")
   wb = Workbook()
 
   ws_site = wb.active
@@ -232,6 +242,8 @@ def export_xlsx(repo: Repository, output_path: Path, domain: str | None = None) 
     }
 
   for row in repo.execute("SELECT * FROM candidates ORDER BY candidate_id").fetchall():
+    if cancel_token is not None:
+      cancel_token.check()
     if allowed_university_ids is not None and int(row["university_id"] or -1) not in allowed_university_ids:
       continue
     status = row["match_status"]
@@ -306,6 +318,8 @@ def export_xlsx(repo: Repository, output_path: Path, domain: str | None = None) 
     LEFT JOIN universities sv ON sv.university_id = sc.university_id
   """
   ).fetchall():
+    if cancel_token is not None:
+      cancel_token.check()
     ws_namesakes.append(
       [
         row["site_full_name"],
@@ -326,6 +340,8 @@ def export_xlsx(repo: Repository, output_path: Path, domain: str | None = None) 
     ORDER BY ue.id
   """
   ).fetchall():
+    if cancel_token is not None:
+      cancel_token.check()
     ws_errors.append(
       [row["official_name"], row["domain"] or "", row["error_type"], row["last_attempt_at"]]
     )
@@ -416,9 +432,14 @@ def export_xlsx(repo: Repository, output_path: Path, domain: str | None = None) 
     )
 
   for worksheet in wb.worksheets:
+    if cancel_token is not None:
+      cancel_token.check()
     _format_sheet(worksheet)
 
-  wb.save(output_path)
+  wb.save(partial_path)
+  if cancel_token is not None:
+    cancel_token.check()
+  partial_path.replace(output_path)
   return output_path
 
 

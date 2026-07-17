@@ -59,6 +59,111 @@ class Repository:
     )
     self.commit()
 
+  def create_pipeline_job(
+    self,
+    run_id: int,
+    *,
+    config_json: str,
+    output_path: str,
+  ) -> None:
+    now = utc_now_iso()
+    self.execute(
+      """
+      INSERT INTO pipeline_jobs (
+        run_id, status, config_json, output_path, created_at, updated_at
+      ) VALUES (?, 'queued', ?, ?, ?, ?)
+      """,
+      (run_id, config_json, output_path, now, now),
+    )
+    self.commit()
+
+  def update_pipeline_job(
+    self,
+    run_id: int,
+    *,
+    status: str,
+    error_message: str | None = None,
+  ) -> None:
+    self.execute(
+      """
+      UPDATE pipeline_jobs
+      SET status = ?, error_message = ?, updated_at = ?
+      WHERE run_id = ?
+      """,
+      (status, error_message, utc_now_iso(), run_id),
+    )
+    self.commit()
+
+  def request_pipeline_cancel(self, run_id: int) -> bool:
+    cur = self.execute(
+      """
+      UPDATE pipeline_jobs
+      SET status = 'cancelling', cancel_requested_at = ?, updated_at = ?
+      WHERE run_id = ?
+        AND status IN ('queued', 'ingest', 'match', 'vk', 'export', 'cancelling')
+      """,
+      (utc_now_iso(), utc_now_iso(), run_id),
+    )
+    self.commit()
+    return cur.rowcount > 0
+
+  def get_pipeline_job(self, run_id: int) -> sqlite3.Row | None:
+    return self.execute(
+      """
+      SELECT r.run_id, r.started_at, r.finished_at, r.status AS run_status,
+             j.status, j.config_json, j.output_path, j.error_message,
+             j.cancel_requested_at, j.created_at, j.updated_at
+      FROM runs r
+      LEFT JOIN pipeline_jobs j ON j.run_id = r.run_id
+      WHERE r.run_id = ?
+      """,
+      (run_id,),
+    ).fetchone()
+
+  def list_pipeline_jobs(self, limit: int = 20) -> list[sqlite3.Row]:
+    return list(self.execute(
+      """
+      SELECT r.run_id, r.started_at, r.finished_at, r.status AS run_status,
+             j.status, j.config_json, j.output_path, j.error_message,
+             j.cancel_requested_at, j.created_at, j.updated_at
+      FROM runs r
+      LEFT JOIN pipeline_jobs j ON j.run_id = r.run_id
+      ORDER BY r.run_id DESC
+      LIMIT ?
+      """,
+      (limit,),
+    ).fetchall())
+
+  def active_run_exists(self) -> bool:
+    row = self.execute(
+      "SELECT 1 FROM runs WHERE status = 'running' AND finished_at IS NULL LIMIT 1"
+    ).fetchone()
+    return row is not None
+
+  def interrupt_active_pipeline_jobs(self) -> list[int]:
+    rows = self.execute(
+      """
+      SELECT run_id FROM pipeline_jobs
+      WHERE status IN ('queued', 'ingest', 'match', 'vk', 'export', 'cancelling')
+      """
+    ).fetchall()
+    run_ids = [int(row["run_id"]) for row in rows]
+    if not run_ids:
+      return []
+    placeholders = ", ".join("?" for _ in run_ids)
+    now = utc_now_iso()
+    self.execute(
+      f"UPDATE pipeline_jobs SET status = 'interrupted', error_message = ?, updated_at = ? "
+      f"WHERE run_id IN ({placeholders})",
+      ["API server restarted before the run finished", now, *run_ids],
+    )
+    self.execute(
+      f"UPDATE runs SET status = 'failed', finished_at = ? WHERE run_id IN ({placeholders})",
+      [now, *run_ids],
+    )
+    self.commit()
+    return run_ids
+
   def find_resumable_run(self) -> int | None:
     row = self.execute(
       "SELECT run_id FROM runs WHERE status = 'running' AND finished_at IS NULL "

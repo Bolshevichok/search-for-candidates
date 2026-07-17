@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from app.config import Limits
+from app.pipeline.cancellation import CancellationToken
 from app.sources.universities.layer1 import run_layer1
 from app.sources.vak.pipeline import run_vak
 
@@ -14,7 +15,10 @@ def run_ingest(
   *,
   db_path: Path | str,
   domain: str | None = None,
+  cancel_token: CancellationToken | None = None,
 ) -> None:
+  if cancel_token is not None:
+    cancel_token.check()
   with ThreadPoolExecutor(max_workers=2) as pool:
     futures = [
       pool.submit(
@@ -25,6 +29,7 @@ def run_ingest(
         max_universities=limits.max_universities,
         workers=limits.layer1_workers,
         domain=domain,
+        cancel_token=cancel_token,
       ),
       pool.submit(
         run_vak,
@@ -33,7 +38,10 @@ def run_ingest(
         request_delay_sec=limits.vak_request_delay_sec,
         max_pages=limits.vak_max_pages,
         detail_workers=limits.vak_detail_workers,
+        cancel_token=cancel_token,
       ),
     ]
     for future in as_completed(futures):
       future.result()
+      if cancel_token is not None:
+        cancel_token.check()

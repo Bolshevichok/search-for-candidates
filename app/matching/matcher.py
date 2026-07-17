@@ -7,6 +7,7 @@ from typing import Any
 from rapidfuzz import fuzz, process
 
 from app.db.repository import Repository
+from app.pipeline.cancellation import CancellationToken
 from app.matching.normalize import normalize_organization
 from app.sources.vak.parser import split_specialty
 
@@ -114,7 +115,14 @@ def _upsert(repo: Repository, card: dict[str, Any]) -> None:
   repo.upsert_candidate(card)
 
 
-def run_match(repo: Repository, run_id: int) -> None:
+def run_match(
+  repo: Repository,
+  run_id: int,
+  *,
+  cancel_token: CancellationToken | None = None,
+) -> None:
+  if cancel_token is not None:
+    cancel_token.check()
   repo.clear_candidates_for_run()
   employees = repo.execute("SELECT * FROM employees_raw").fetchall()
   vak_rows = repo.execute("SELECT * FROM vak_raw").fetchall()

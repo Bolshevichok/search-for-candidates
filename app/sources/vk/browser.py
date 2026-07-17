@@ -13,6 +13,7 @@ from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
 from selectolax.parser import HTMLParser
 
 from app.db.repository import open_repository, utc_now_iso
+from app.pipeline.cancellation import CancellationToken, PipelineCancelled
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -122,9 +123,16 @@ def parse_mobile_members(html: str, *, page_url: str, offset: int) -> tuple[int 
 
 
 class VkMobileMemberSearcher:
-  def __init__(self, *, request_delay_sec: float, extract_public_contacts: bool) -> None:
+  def __init__(
+    self,
+    *,
+    request_delay_sec: float,
+    extract_public_contacts: bool,
+    cancel_token: CancellationToken | None = None,
+  ) -> None:
     self.request_delay_sec = max(0.0, request_delay_sec)
     self.extract_public_contacts = extract_public_contacts
+    self.cancel_token = cancel_token
     self._browser: Browser | None = None
     self._context: BrowserContext | None = None
     self._page: Page | None = None
@@ -182,6 +190,8 @@ class VkMobileMemberSearcher:
   def search_community(self, tasks: list[VkCandidateTask]) -> list[VkProfileResult]:
     if not tasks:
       return []
+    if self.cancel_token is not None:
+      self.cancel_token.check()
     first_url = mobile_members_url(tasks[0].vk_url)
     target_ids_by_name: dict[str, set[str]] = {}
     for task in tasks:
@@ -196,6 +206,8 @@ class VkMobileMemberSearcher:
     found: dict[str, dict[str, _MobileMember]] = {}
 
     for index in range(pages):
+      if self.cancel_token is not None:
+        self.cancel_token.check()
       offset = index * 50
       page_url = mobile_members_url(tasks[0].vk_url, offset)
       if index:
@@ -207,10 +219,15 @@ class VkMobileMemberSearcher:
         for candidate_id in target_ids_by_name.get(normalize_text(member.profile_name), set()):
           found.setdefault(candidate_id, {})[member.profile_url] = member
       if index < pages - 1 and self.request_delay_sec:
-        time.sleep(self.request_delay_sec)
+        if self.cancel_token is not None:
+          self.cancel_token.wait(self.request_delay_sec)
+        else:
+          time.sleep(self.request_delay_sec)
 
     results: list[VkProfileResult] = []
     for task in tasks:
+      if self.cancel_token is not None:
+        self.cancel_token.check()
       matches = list(found.get(task.candidate_id, {}).values())
       if not matches:
         results.append(VkProfileResult(task.candidate_id, task.community_id, None, "not_found", first_url))
@@ -231,6 +248,8 @@ class VkMobileMemberSearcher:
         phone = None
         if self.extract_public_contacts:
           try:
+            if self.cancel_token is not None:
+              self.cancel_token.check()
             email, phone = self._public_contacts(member.profile_url)
           except Exception as exc:
             _LOGGER.info("Could not read public contacts on %s: %s", member.profile_url, type(exc).__name__)
@@ -275,14 +294,21 @@ def _load_tasks(db_path: Path, *, domain: str | None, limit: int, refresh: bool)
 
 
 def _search_community(
-  tasks: list[VkCandidateTask], *, request_delay_sec: float, extract_public_contacts: bool,
+  tasks: list[VkCandidateTask],
+  *,
+  request_delay_sec: float,
+  extract_public_contacts: bool,
+  cancel_token: CancellationToken | None,
 ) -> list[VkProfileResult]:
   try:
     with VkMobileMemberSearcher(
       request_delay_sec=request_delay_sec,
       extract_public_contacts=extract_public_contacts,
+      cancel_token=cancel_token,
     ) as searcher:
       return searcher.search_community(tasks)
+  except PipelineCancelled:
+    raise
   except Exception as exc:
     _LOGGER.warning("VK community scan error for %s: %s", tasks[0].vk_url if tasks else "?", exc)
     return [VkProfileResult(task.candidate_id, task.community_id, None, "error", mobile_members_url(task.vk_url)) for task in tasks]
@@ -298,10 +324,13 @@ def run_vk(
   limit: int = 100,
   extract_public_contacts: bool = False,
   refresh: bool = False,
+  cancel_token: CancellationToken | None = None,
 ) -> None:
   del run_id
   path = Path(db_path)
   tasks = _load_tasks(path, domain=domain, limit=limit, refresh=refresh)
+  if cancel_token is not None:
+    cancel_token.check()
   if not tasks:
     _LOGGER.info("No candidates to process for VK")
     return
@@ -315,18 +344,29 @@ def run_vk(
   )
   results: list[VkProfileResult] = []
   with ThreadPoolExecutor(max_workers=max(1, workers)) as executor:
-    futures = [
-      executor.submit(
-        _search_community,
-        community_tasks,
-        request_delay_sec=request_delay_sec,
-        extract_public_contacts=extract_public_contacts,
-      )
-      for community_tasks in grouped.values()
-    ]
-    for future in as_completed(futures):
-      results.extend(future.result())
+    futures = []
+    try:
+      for community_tasks in grouped.values():
+        if cancel_token is not None:
+          cancel_token.check()
+        futures.append(executor.submit(
+          _search_community,
+          community_tasks,
+          request_delay_sec=request_delay_sec,
+          extract_public_contacts=extract_public_contacts,
+          cancel_token=cancel_token,
+        ))
+      for future in as_completed(futures):
+        results.extend(future.result())
+        if cancel_token is not None:
+          cancel_token.check()
+    except Exception:
+      for future in futures:
+        future.cancel()
+      raise
 
+  if cancel_token is not None:
+    cancel_token.check()
   with open_repository(path) as repo:
     if refresh:
       for task in tasks:
