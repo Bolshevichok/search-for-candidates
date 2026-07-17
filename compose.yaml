@@ -1,0 +1,13 @@
+services:
+  api:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      APP_DB_PATH: data/state.sqlite
+      APP_CONFIG_PATH: config.yaml
+      APP_OUTPUT_DIR: output
+    volumes:
+      - ./data:/app/data
+      - ./output:/app/output
+      - ./config.yaml:/app/config.yaml:ro

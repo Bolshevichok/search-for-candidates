@@ -1,0 +1,14 @@
+.git
+.venv
+__pycache__
+*.py[cod]
+*.egg-info
+.env
+output
+research
+data/state.sqlite
+data/state.sqlite-*
+data/raw
+test-results
+playwright-report
+.playwright
