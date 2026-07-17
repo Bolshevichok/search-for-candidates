@@ -1,7 +1,7 @@
-
 from __future__ import annotations
 
 import asyncio
+import functools
 import heapq
 import html as html_lib
 import itertools
@@ -34,30 +34,8 @@ from app.sources.http_client import HttpClient
 
 _LOGGER = logging.getLogger(__name__)
 
-_EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
-_PHONE_RE = re.compile(
-    r"(?:\+7|8|7)[\s\-]?\(?\d{3,4}\)?[\s\-]?\d{2,3}[\s\-]?\d{2}[\s\-]?\d{2}(?:\s*\(\d{2,6}\))?"
-    r"|\+\d{1,3}[\s\-]?\d{7,14}"
-)
-
-# Transliteration variants for scoring URLs that embed the person's surname
-# (personal pages like /staff/ivanov-i-i/). Two maps because
-# RU->EN transliteration is not standardized: х -> kh|h, й -> y|j, ц -> ts|c
-_TRANSLIT_MAPS = (
-    {"а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e",
-     "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m",
-     "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
-     "ф": "f", "х": "kh", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "shch",
-     "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu", "я": "ya"},
-    {"а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e",
-     "ж": "j", "з": "z", "и": "i", "й": "j", "к": "k", "л": "l", "м": "m",
-     "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
-     "ф": "f", "х": "h", "ц": "c", "ч": "ch", "ш": "sh", "щ": "sch",
-     "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu", "я": "ya"},
-)
-
-
 def _surname_translit_variants(last_name: str) -> tuple[str, ...]:
+    """Transliterate a surname both ways, return variants of length >= 3."""
     last = last_name.lower().strip()
     if not last:
         return ()
@@ -73,34 +51,69 @@ _SKIP_EXTENSIONS = (
     ".mp4", ".mp3", ".avi", ".css", ".js", ".woff", ".woff2", ".ttf",
 )
 
-# Слова-стопы: если что-то из этого встречается в URL (хост, путь или query),
-# ссылка не скачивается и вглубь по ней не идём -- это разделы, где контактов
-# сотрудников не бывает (новости, афиша, медиа, абитуриентам, личные кабинеты...).
-# Список легко пополнять.
+# Банворды
 _BLOCKED_URL_KEYWORDS = (
-    # новости / события / пресса
     "news", "novost", "press", "media",
     "event", "sobyti", "anons", "afisha", "calendar", "kalendar",
-    # медиатека
     "gallery", "galere", "photo", "foto", "video",
-    # блоги / форумы / архивы
     "blog", "forum", "arhiv", "archive",
-    # абитуриентам / приёмная кампания
     "abitur", "priem", "admission", "postuplen",
-    # служебное: авторизация, корзины, трекинг
     "login", "signin", "signup", "logout", "authoriz", "avtoriz", "register",
     "basket", "cart", "bitrix", "captcha",
-    # версии для печати / RSS / карты сайта
-    "print=", "rss", "sitemap",
+    "print=", "rss", "sitemap", "pretendent", "postupa", "vakansii", "blank", "otpusk",
+    "sveden", "gramot", "pozdrav", "posdraw", "mezhd", "otnosh", "united", "sertif", "certif",
+    "old", "new", "bot", "feed", "recom", "reklama", "ad", "director", "uprav", "stud", "abit"
 )
+# Приоритет ворды
+_STAFF_KEYWORDS = (
+    "sotrudnik", "prepodavatel", "kafedra", "staff", "person", "employee",
+    "teacher", "pps", "sostav", "kontakt", "contact", "people", "professor",
+    "employees", "faculty",
+)
+
+_ANTIBOT_MARKERS = (
+    "just a moment", "cf-browser-verification", "checking your browser",
+    "attention required! | cloudflare", "enable javascript to run this app",
+    "включите javascript",
+)
+
+# RU->EN transliteration maps for scoring URLs that embed the surname (two variants: х->kh|h, й->y|j, ц->ts|c).
+_TRANSLIT_MAPS = (
+    {"а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e",
+     "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m",
+     "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
+     "ф": "f", "х": "kh", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "shch",
+     "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu", "я": "ya"},
+    {"а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e",
+     "ж": "j", "з": "z", "и": "i", "й": "j", "к": "k", "л": "l", "м": "m",
+     "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
+     "ф": "f", "х": "h", "ц": "c", "ч": "ch", "ш": "sh", "щ": "sch",
+     "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu", "я": "ya"},
+)
+
+_EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+_PHONE_RE = re.compile(
+    r"(?:\+7|8|7)[\s\-]?\(?\d{3,4}\)?[\s\-]?\d{2,3}[\s\-]?\d{2}[\s\-]?\d{2}(?:\s*\(\d{2,6}\))?"
+    r"|\+\d{1,3}[\s\-]?\d{7,14}"
+)
+_MAILTO_RE = re.compile(r'href=["\']mailto:([^"\'?]+)', re.I)
+_TEL_HREF_RE = re.compile(r'href=["\']tel:([^"\']+)', re.I)
+
+
+_MAX_FETCHES_PER_CANDIDATE = 40  # максимум страниц на кандидата
+_MAX_FETCHES_PER_DOMAIN = 3000  # максимум страниц на ВУЗ
+
+_MIN_HTTP_TEXT_CHARS = 500
 
 
 def _url_blocked(url: str, blocked: tuple[str, ...]) -> bool:
+    """True if the URL contains any blocked keyword."""
     low = unquote(url).lower()
     return any(word in low for word in blocked)
 
 
 def _clean_text(value: str) -> str:
+    """Collapse whitespace and strip."""
     return re.sub(r"\s+", " ", value).strip()
 
 
@@ -130,7 +143,10 @@ class Layer2Contract:
             "error_message": self.error_message,
         }
 
+
+@functools.lru_cache(maxsize=256)
 def _html_to_text(value: str) -> str:
+    """Strip scripts/styles/tags, unescape entities, collapse whitespace."""
     text = re.sub(r"<script\b[^<]*(?:(?!</script>)<[^<]*)*</script>", " ", value, flags=re.I)
     text = re.sub(r"<style\b[^<]*(?:(?!</style>)<[^<]*)*</style>", " ", text, flags=re.I)
     text = re.sub(r"<[^>]+>", " ", text)
@@ -138,21 +154,38 @@ def _html_to_text(value: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+@functools.lru_cache(maxsize=64)
+def _parse_tree(html: str) -> HTMLParser:
+    """Cached selectolax parse tree, shared across all read-only call sites for one page."""
+    return HTMLParser(html)
+
+def _extract_mailto_tel(html: str) -> tuple[list[str], list[str]]:
+    """Pull email/phone out of mailto:/tel: href attributes before _html_to_text would drop them."""
+    emails: list[str] = []
+    for raw in _MAILTO_RE.findall(html):
+        match = _EMAIL_RE.search(unquote(raw))
+        if match:
+            emails.append(match.group(0))
+
+    phones: list[str] = []
+    for raw in _TEL_HREF_RE.findall(html):
+        addr = unquote(raw).strip()
+        match = _PHONE_RE.search(addr)
+        if match:
+            phones.append(match.group(0))
+        elif len(re.sub(r"\D", "", addr)) >= 7:
+            phones.append(addr)  # tel: hrefs are usually a clean number even without _PHONE_RE's formatting
+
+    return list(dict.fromkeys(emails)), list(dict.fromkeys(phones))
+
+
 _BLOCK_SELECTORS = ("tr", "li", "article", "dd")
 _MAX_SNIPPET_CHARS = 6000
 
 
 def _find_person_html_snippet(html: str, pattern: re.Pattern[str]) -> str | None:
-    """Find the smallest common per-person container (table row, list item,
-    ...) whose text matches `pattern`, and return its outer HTML.
-
-    This matters because real pages routinely have several KB of
-    <head>/nav/inline-scripts before any content -- a blind html[:N] budget
-    can be entirely consumed by boilerplate and never reach the row/card
-    that actually has this person's contact in it, even though the person
-    is right there on the page (see: Гончаренко/utmn.ru regression).
-    """
-    tree = HTMLParser(html)
+    """Smallest per-person container (row/list-item/...) whose text matches `pattern`; its outer HTML, or None."""
+    tree = _parse_tree(html)
     for selector in _BLOCK_SELECTORS:
         for node in tree.css(selector):
             text = _clean_text(node.text(separator=" "))
@@ -169,10 +202,8 @@ _MAX_PERSONAL_PAGE_CHARS = 20000
 
 
 def _is_personal_page(html: str, pattern: re.Pattern[str]) -> bool:
-    """A page whose title/heading IS the person's name is their personal
-    card -- the whole page is about them, so contacts anywhere on it
-    (sidebar, table far below the header) belong to them."""
-    tree = HTMLParser(html)
+    """True if the person's name is in title/h1/h2/h3 -- the whole page is their own card."""
+    tree = _parse_tree(html)
     for selector in _PERSONAL_PAGE_SELECTORS:
         for node in tree.css(selector):
             if pattern.search(_clean_text(node.text(separator=" "))):
@@ -180,20 +211,24 @@ def _is_personal_page(html: str, pattern: re.Pattern[str]) -> bool:
     return False
 
 
+def _with_mailto_tel(text: str, html_scope: str) -> str:
+    """Append mailto:/tel: contacts found in `html_scope` to the already-stripped `text`."""
+    emails, phones = _extract_mailto_tel(html_scope)
+    if not emails and not phones:
+        return text
+    return f"{text}\n[href contacts: {' '.join(emails + phones)}]"
+
+
 def _relevant_content_for_name(html: str, full_name: str) -> str:
-    """Best-effort scoped content around this person, for both the regex
-    fallback and the LLM prompt: the whole page if it's the person's own
-    card (name in title/h1 -- contacts can sit far from the name), else the
-    smallest per-person block, else a text window centered on the name
-    match, else the head of the cleaned, tag-stripped page text."""
+    """Scoped text for this person: whole page if it's their own card, else nearest block, else a window around the name match, else the head of the page."""
     target_last, target_first, target_patr = split_fio_parts(full_name)
     pattern = _build_loose_name_pattern(target_last, target_first, target_patr, strict=True)
     if pattern:
         if _is_personal_page(html, pattern):
-            return _html_to_text(html)[:_MAX_PERSONAL_PAGE_CHARS]
+            return _with_mailto_tel(_html_to_text(html)[:_MAX_PERSONAL_PAGE_CHARS], html)
         snippet = _find_person_html_snippet(html, pattern)
         if snippet:
-            return snippet
+            return _with_mailto_tel(_html_to_text(snippet)[:_MAX_SNIPPET_CHARS], snippet)
         plain_text = _html_to_text(html)
         match = pattern.search(plain_text)
         if match:
@@ -203,48 +238,11 @@ def _relevant_content_for_name(html: str, full_name: str) -> str:
     return _html_to_text(html)[:4000]
 
 
-# ---------------------------------------------------------------------------
-# Contact parsing (Yandex LLM with regex fallback) and page fetching
-# ---------------------------------------------------------------------------
-
-
-_MAX_LLM_CONTEXT_CHARS = 3500
-_LLM_WINDOW = 300
-
-
-def _compact_llm_context(content: str, full_name: str) -> str:
-    """Squeeze the page content down for the LLM prompt: plain text only,
-    keeping just the windows around the person's name and around every
-    email/phone occurrence -- that's all the model needs to attribute a
-    contact -- capped at _MAX_LLM_CONTEXT_CHARS."""
-    text = _html_to_text(content) if "<" in content else re.sub(r"\s+", " ", content).strip()
-    if len(text) <= _MAX_LLM_CONTEXT_CHARS:
-        return text
-
-    spans: list[tuple[int, int]] = []
-    target_last, target_first, target_patr = split_fio_parts(full_name)
-    pattern = _build_loose_name_pattern(target_last, target_first, target_patr)
-    matchers: list[re.Pattern[str]] = [p for p in (pattern, _EMAIL_RE, _PHONE_RE) if p]
-    for rx in matchers:
-        for m in rx.finditer(text):
-            spans.append((max(0, m.start() - _LLM_WINDOW), min(len(text), m.end() + _LLM_WINDOW)))
-    if not spans:
-        return text[:_MAX_LLM_CONTEXT_CHARS]
-
-    spans.sort()
-    merged: list[list[int]] = [list(spans[0])]
-    for start, end in spans[1:]:
-        if start <= merged[-1][1]:
-            merged[-1][1] = max(merged[-1][1], end)
-        else:
-            merged.append([start, end])
-    out = " ... ".join(text[s:e] for s, e in merged)
-    return out[:_MAX_LLM_CONTEXT_CHARS]
+# --- Contact parsing (Yandex LLM with regex fallback) and page fetching ---
 
 
 class YandexLLMParser:
-    """Parse crawled HTML using Yandex Cloud LLM API, with a regex fallback
-    scoped to the requested person."""
+    """Parse crawled HTML for one person's contacts: Yandex Cloud LLM, with a name-scoped regex fallback."""
 
     def __init__(self) -> None:
         self.folder_id = os.getenv("YANDEX_FOLDER_ID", "").strip()
@@ -258,7 +256,7 @@ class YandexLLMParser:
         self.available = bool(self.folder_id and self.api_key and self.model and OPENAI_AVAILABLE)
 
     def _extract_with_regex(self, html: str, full_name: str) -> dict[str, Any]:
-        """Fallback: extract contacts only near the requested person name."""
+        """Fallback: extract contacts only from content scoped to the requested person."""
         if not full_name.strip():
             return {
                 "full_name": None,
@@ -291,6 +289,7 @@ class YandexLLMParser:
             "contact_type": "personal" if emails or phones else "none",
             "confidence": "medium" if emails or phones else "low",
             "method": "regex",
+            "_email_count": len(emails),  # internal: used by parse() to skip the LLM call
         }
         if emails:
             result["email"] = emails[0]
@@ -299,49 +298,41 @@ class YandexLLMParser:
         return result
 
     async def parse(self, html: str, full_name: str, candidate_id: str) -> dict[str, Any]:
-        """Parse HTML using Yandex LLM or fallback to regex.
-
-        The LLM is a last resort, only for genuinely ambiguous pages:
-        - no contact patterns anywhere in the person's context -> nothing to
-          extract, skip the call entirely;
-        - exactly one email and at most one phone in the person's scoped
-          context -> unambiguous, regex answer is just as good;
-        - only several emails/phones near the person need the LLM to pick
-          the right one.
-        """
+        """Regex first; call the LLM only when regex is ambiguous (not the person's own page and >1 email found)."""
         if not full_name.strip():
             _LOGGER.warning("Layer2 parser called without full_name for %s", candidate_id)
             return self._extract_with_regex(html, full_name)
 
-        if not self.available:
-            return self._extract_with_regex(html, full_name)
+        regex_result = self._extract_with_regex(html, full_name)
+        if regex_result.get("email") or regex_result.get("phone"):
+            target_last, target_first, target_patr = split_fio_parts(full_name)
+            page_pattern = _build_loose_name_pattern(target_last, target_first, target_patr, strict=True)
+            is_personal = bool(page_pattern) and _is_personal_page(html, page_pattern)
+            if is_personal or regex_result.get("_email_count") == 1:
+                return regex_result
 
-        context = _html_to_text(_relevant_content_for_name(html, full_name))
-        emails = set(_EMAIL_RE.findall(context))
-        phones = set(_PHONE_RE.findall(context))
-        if len(emails) <= 1 and len(phones) <= 1:
-            return self._extract_with_regex(html, full_name)
+        if not self.available:
+            return regex_result
 
         llm_result = await self._parse_with_yandex_llm(html, full_name)
         if llm_result:
             return llm_result
 
-        return self._extract_with_regex(html, full_name)
+        return regex_result
 
     async def _parse_with_yandex_llm(self, html: str, full_name: str) -> dict[str, Any] | None:
-        """Call Yandex GPT API via OpenAI AsyncOpenAI client."""
+        """Call Yandex GPT via the OpenAI-compatible AsyncOpenAI client; None on any failure/mismatch."""
         if not self.available:
             return None
 
-        content = _compact_llm_context(
-            _relevant_content_for_name(html, full_name), full_name
-        )
-        prompt = f"""Extract contacts ONLY for: {full_name}.
-Name variants with the same surname and initials are the same person ("Иванов Иван Иванович" = "Иванов И.И."). Never take contacts of a person with a different surname, first-name initial, or patronymic. If the person is absent, return nulls and contact_type "none".
-Return ONLY JSON (no markdown):
-{{"full_name": "... or null", "email": "... or null", "phone": "... or null", "contact_type": "personal or none", "confidence": "high or medium or low"}}
+        content = _relevant_content_for_name(html, full_name)
+        prompt = f"""Extract email/phone for ONLY this person: {full_name}.
+Name match rule: same surname + same first-name initial (+ same patronymic initial, if given) = same person, e.g. "Иванов И.И." matches "Иванов Иван Иванович". Any different initial/patronymic = a different person -> return nulls, contact_type "none".
+If the person isn't in TEXT, return nulls, contact_type "none".
+Return ONLY this JSON (no markdown):
+{{"full_name": "as found or null", "email": "or null", "phone": "or null", "contact_type": "personal or none", "confidence": "high or medium or low"}}
 
-Text:
+TEXT:
 {content}"""
 
         try:
@@ -353,9 +344,17 @@ Text:
                 completion = await client.chat.completions.create(
                     model=f"gpt://{self.folder_id}/{self.model}",
                     messages=[
-                        {"role": "user", "content": prompt},
+                        {
+                            "role": "system",
+                            "content": "You are a helpful assistant that extracts contact information from HTML. Respond with JSON only, no markdown."
+                        },
+                        {
+                            "role": "user",
+                            "content": prompt,
+                        },
                     ],
                     temperature=0.1,
+                    max_tokens=200,
                 )
 
             if not getattr(completion, "choices", None):
@@ -402,28 +401,27 @@ Text:
 
 
 class Crawl4AICrawler:
-    """Fetch pages with Crawl4AI (JS rendering).
-
-    Pass a shared, already-running `AsyncWebCrawler` (`browser`) to reuse
-    across many `.crawl()` calls -- launching a full browser per page is by
-    far the most expensive part of the crawl. run_layer2 launches one
-    browser for the whole run and shares it across every candidate/task;
-    leave `browser=None` (the default) for standalone/one-off use, which
-    keeps the launch-per-call behavior.
-    """
+    """Fetch pages with Crawl4AI (real browser, JS rendering); pass a shared running `browser` to avoid a launch per page."""
 
     def __init__(self, browser: "AsyncWebCrawler | None" = None) -> None:
         self._browser = browser
 
     async def crawl(self, url: str) -> str | None:
-        """Crawl a page using Crawl4AI."""
+        """Crawl one page; None on any failure (logged) or if crawl4ai isn't installed."""
         if not CRAWL4AI_AVAILABLE:
             return None
 
         try:
             if self._browser is not None:
                 result = await self._browser.arun(url=url, wait_for="body", timeout=15)
-                return result.html if result.success else None
+                if result.success:
+                    return result.html
+
+                _LOGGER.warning(
+                    "Crawl4AI unsuccessful for %s (result.success=False)",
+                    url,
+                )
+                return None
             browser_config = BrowserConfig(ignore_https_errors=True, verbose=False)
             async with AsyncWebCrawler(config=browser_config) as browser:
                 result = await browser.arun(
@@ -433,42 +431,27 @@ class Crawl4AICrawler:
                 )
                 if result.success:
                     return result.html
+
+                _LOGGER.warning(
+                    "Crawl4AI unsuccessful for %s (result.success=False)",
+                    url,
+                )
+                return None
         except Exception as e:
             _LOGGER.warning(f"Crawl4AI error for {url}: {e}")
         return None
 
 
 def _name_part_regex(part: str) -> str:
-    """Regex for one name part; е and ё are interchangeable because
-    normalize_fio/split_fio_parts fold ё to е while real pages keep ё
-    (Пётр, Фёдор, Семёнова...)."""
+    """Regex for one name part; е/ё interchangeable (pages keep ё, normalize_fio folds it to е)."""
     return "".join(
         "[еёЕЁ]" if ch in "еёЕЁ" else re.escape(ch) for ch in part
     )
 
-
+#
 def _build_loose_name_pattern(
     last: str, first: str, patronymic: str | None, *, strict: bool = False
 ) -> re.Pattern[str] | None:
-    """Build a pattern that recognizes this person's name on a page in any
-    of the forms Russian university sites commonly use.
-
-    Matching only the abbreviated "Фамилия И.О." form misses the common
-    case of a fully spelled-out name -- "Гончаренко Анастасия Николаевна" --
-    which real pages overwhelmingly use instead. This covers, in either
-    word order:
-      - full name:           Фамилия Имя Отчество / Имя Отчество Фамилия
-      - full, no patronymic: Фамилия Имя / Имя Фамилия
-      - abbreviated:          Фамилия И.О. / И.О. Фамилия
-
-    `strict`: when the candidate has a patronymic, drop the
-    patronymic-agnostic alternatives (surname+first-name alone). Without
-    this, "Иванов Иван" matches "Иванов Иван Петрович" *and* "Иванов Иван
-    Сидорович" equally -- fine for "is this person worth a closer look on
-    this page" (used while walking the section), but not for deciding which
-    block/page's contact actually belongs to our candidate. Callers that
-    are about to pick a specific contact value should pass strict=True.
-    """
     if not last or not first:
         return None
     last_e = _name_part_regex(last)
@@ -488,8 +471,6 @@ def _build_loose_name_pattern(
         alternatives.append(rf"{last_e}\s+{first_initial_e}\.?\s*{patr_initial_e}\.?(?=\W|$)")
         alternatives.append(rf"{first_initial_e}\.?\s*{patr_initial_e}\.?\s+{last_e}(?=\W|$)")
     elif strict:
-        # No patronymic on either side to compare -- strict degrades to the
-        # same as loose here, there's nothing more specific to require.
         alternatives.append(rf"{last_e}\s+{first_initial_e}\.?(?=\W|$)")
         alternatives.append(rf"{first_initial_e}\.?\s+{last_e}(?=\W|$)")
     else:
@@ -500,10 +481,26 @@ def _build_loose_name_pattern(
     return re.compile(pattern, re.IGNORECASE)
 
 
+def _looks_like_js_shell_or_challenge(html: str) -> bool:
+    """True if the page is an anti-bot challenge or a near-empty JS-app shell."""
+    low = html.lower()
+    if any(marker in low for marker in _ANTIBOT_MARKERS):
+        return True
+    return len(_html_to_text(html)) < _MIN_HTTP_TEXT_CHARS
+
+# Сначала быстрый http запрос, если ответа нет / антибот - через браузер с Crawl4AI
 async def _fetch_page(
-    url: str, crawler: "Crawl4AICrawler", client: HttpClient, request_delay_sec: float = 0.0
+    url: str,
+    crawler: "Crawl4AICrawler",
+    client: HttpClient,
+    request_delay_sec: float = 0.0,
+    prefer_browser: bool = False,
 ) -> str | None:
-    html = await crawler.crawl(url) if CRAWL4AI_AVAILABLE else None
+    """Fetch one page: plain HTTP first (fast), escalate to the real browser only if HTTP failed/empty or looks like a JS shell/anti-bot page (unless `prefer_browser`, which tries the browser first)."""
+    html: str | None = None
+    if prefer_browser:
+        html = await crawler.crawl(url) if CRAWL4AI_AVAILABLE else None
+
     if not html:
         try:
             response = await asyncio.to_thread(client.get, url)
@@ -511,43 +508,25 @@ async def _fetch_page(
         except Exception as e:  # noqa: BLE001
             _LOGGER.debug(f"Failed to fetch {url}: {e}")
             html = None
+
+    if not prefer_browser and CRAWL4AI_AVAILABLE:
+        if not html or _looks_like_js_shell_or_challenge(html):
+            browser_html = await crawler.crawl(url)
+            if browser_html:
+                html = browser_html
+
     if request_delay_sec:
         await asyncio.sleep(request_delay_sec)
     return html
 
 
-# ---------------------------------------------------------------------------
-# Smart priority-driven crawl.
-#
-# Instead of walking links top-to-bottom, every discovered link is scored for
-# how likely it is to lead to THIS candidate's personal/staff page, and the
-# frontier is a priority queue:
-#   - links found in the same markup block as the person's name (the row/card
-#     where the FIO appears) go first -- on alphabet/search index pages the
-#     link right next to the FIO is almost always the personal page;
-#   - alphabet-index links ("А", "Б", ?letter=..) are followed only for the
-#     letter matching the candidate's surname, all other letters are skipped;
-#   - links whose URL/anchor contain the surname (Cyrillic or transliterated)
-#     outrank staff-section links, which outrank everything else;
-#   - pagination gets a small boost, generic navigation sinks to the bottom.
-# The crawl never leaves the university's own site (domain + its subdomains),
-# and page HTML is cached per university, shared across all of its candidates.
-# ---------------------------------------------------------------------------
+# --- Smart priority-driven crawl: every discovered link is scored for how likely it leads to THIS
+# candidate's personal page, and the frontier is a priority queue (links next to the FIO first,
+# alphabet-index links only for the matching letter, surname-in-URL beats staff-section beats
+# everything else, pagination gets a small boost). Never leaves the university's own site;
+# HTML is cached per university and shared across all of its candidates.
 
 _SEED_HOST_TEMPLATES = ("{domain}", "www.{domain}")
-
-# Fetch budgets: per-candidate (frontier walk) and per-university (network).
-_MAX_FETCHES_PER_CANDIDATE = 40
-# Shared across every candidate of the university; each candidate needs his
-# own personal card (the cache only saves re-downloading list/index pages),
-# so this must be well above candidates_per_university * pages_per_candidate.
-_MAX_FETCHES_PER_DOMAIN = 3000
-
-_STAFF_KEYWORDS = (
-    "sotrudnik", "prepodavatel", "kafedra", "staff", "person", "employee",
-    "teacher", "pps", "sostav", "kontakt", "contact", "people", "professor",
-    "employees", "faculty",
-)
 
 _SINGLE_LETTER_RE = re.compile(r"^[А-ЯЁа-яёA-Za-z]$")
 _LETTER_QUERY_RE = re.compile(r"^(?:[A-Za-z_]+=)?([А-ЯЁа-яё])$")
@@ -556,19 +535,20 @@ _PAGINATION_RE = re.compile(r"[?&](?:page|p|pagen[_\d]*)=\d+|/page/\d+", re.I)
 
 @dataclass
 class _DomainCrawlState:
-    """Per-university crawl cache shared across all of its candidates:
-    fetched page HTML ('' = fetch failed, don't retry) and the network-fetch
-    budget counter."""
+    """Per-university crawl cache shared across all its candidates: fetched HTML, in-flight fetches (dedup racing requests), fetch-budget counter."""
 
     pages: dict[str, str] = field(default_factory=dict)
+    pending: dict[str, "asyncio.Future[str]"] = field(default_factory=dict)
     fetches: int = 0
 
 
 def _norm_url(url: str) -> str:
+    """Drop fragment, strip trailing slash -- cache/visited key."""
     return url.split("#", 1)[0].rstrip("/")
 
 
 def _same_site(url: str, domain: str) -> bool:
+    """True if url's host is exactly `domain` or a subdomain of it."""
     netloc = urlparse(url).netloc.lower().split(":", 1)[0]
     domain = domain.lower()
     return netloc == domain or netloc.endswith("." + domain)
@@ -580,8 +560,8 @@ def _page_links(
     domain: str,
     blocked: tuple[str, ...] = _BLOCKED_URL_KEYWORDS,
 ) -> list[tuple[str, str]]:
-    """(absolute_url, anchor_text) pairs for crawlable same-site links."""
-    tree = HTMLParser(html)
+    """(absolute_url, anchor_text) pairs for crawlable same-site links on the page."""
+    tree = _parse_tree(html)
     seen: set[str] = set()
     out: list[tuple[str, str]] = []
     for node in tree.css("a[href]"):
@@ -604,6 +584,9 @@ def _page_links(
     return out
 
 
+_MAX_NEAR_NAME_BLOCK_CHARS = 3000
+
+
 def _links_near_name(
     html: str,
     base_url: str,
@@ -611,16 +594,17 @@ def _links_near_name(
     pattern: re.Pattern[str],
     blocked: tuple[str, ...] = _BLOCKED_URL_KEYWORDS,
 ) -> list[str]:
-    """Links inside the same per-person markup block (table row, list item,
-    card) where the candidate's name appears -- on index/search pages that
-    nearest link is almost always the personal page."""
-    tree = HTMLParser(html)
+    """Links inside the same per-person block (row/card/...) as the matched name -- almost always the personal-page link. `div` included for grid-style staff directories; size-checked before `.text()` to avoid re-serializing huge nav wrappers."""
+    tree = _parse_tree(html)
     out: list[str] = []
     seen: set[str] = set()
     for selector in ("tr", "li", "dd", "article", "td", "p", "div"):
         for node in tree.css(selector):
+            raw_html = node.html or ""
+            if not raw_html or len(raw_html) > _MAX_NEAR_NAME_BLOCK_CHARS:
+                continue
             text = _clean_text(node.text(separator=" "))
-            if not text or len(text) > 2000 or not pattern.search(text):
+            if not text or not pattern.search(text):
                 continue
             for a in node.css("a[href]"):
                 href = a.attributes.get("href", "")
@@ -640,15 +624,13 @@ def _links_near_name(
                 seen.add(absolute)
                 out.append(absolute)
         if out:
-            # The smallest matching container type already gave us the
-            # nearest links; larger containers would only add noise.
-            break
+            break  # smallest matching container type already gave the nearest links
+
     return out
 
 
 def _alphabet_letter(url: str, anchor: str) -> str | None:
-    """If this link is an alphabet-index entry ('А', 'Б', ?letter=В,
-    ?%D0%90), return its letter; otherwise None."""
+    """If this link is an alphabet-index entry ('А', ?letter=В...), its letter; else None."""
     if _SINGLE_LETTER_RE.match(anchor):
         return anchor
     query = unquote(urlparse(url).query).strip()
@@ -657,7 +639,7 @@ def _alphabet_letter(url: str, anchor: str) -> str | None:
         return match.group(1)
     return None
 
-
+# Приоритезация ссылок
 def _score_link(
     url: str,
     anchor: str,
@@ -665,8 +647,7 @@ def _score_link(
     translit_variants: tuple[str, ...],
     name_pattern: re.Pattern[str] | None,
 ) -> int | None:
-    """Priority score for a link, higher = crawled sooner. None = skip
-    (an alphabet-index link for a different letter than the surname's)."""
+    """Priority score for a link, higher = crawled sooner; None = skip (alphabet-index link for another letter)."""
     letter = _alphabet_letter(url, anchor)
     if letter is not None:
         return 90 if letter.lower() == target_last[:1].lower() else None
@@ -675,15 +656,15 @@ def _score_link(
     low = unquote(url).lower()
     anchor_low = anchor.lower()
     last_low = target_last.lower()
-    if name_pattern is not None and name_pattern.search(anchor):
-        score += 120  # anchor text IS the person's name
-    elif last_low and (last_low in anchor_low or last_low in low):
+    if name_pattern is not None and name_pattern.search(anchor): # URL совпадает с ФИО
+        score += 120
+    elif last_low and (last_low in anchor_low or last_low in low): # Фамилия в URL или тексте ссылки
         score += 100
-    if any(t in low for t in translit_variants):
-        score += 80  # transliterated surname in the URL (personal page slug)
-    if any(k in low or k in anchor_low for k in _STAFF_KEYWORDS):
+    if any(t in low for t in translit_variants): # Фамилия в транслите в URL (суммируется)
+        score += 80
+    if any(k in low or k in anchor_low for k in _STAFF_KEYWORDS): # На странице встречется приоритет ворд
         score += 30
-    if _PAGINATION_RE.search(low):
+    if _PAGINATION_RE.search(low): # Если ссылка похожа на пагинацию ?page=2, /page/3
         score += 10
     return score
 
@@ -695,16 +676,14 @@ async def _smart_crawl_for_candidate(
     state: _DomainCrawlState,
     crawler: "Crawl4AICrawler",
     client: HttpClient,
+    parser: "YandexLLMParser",
     request_delay_sec: float = 0.0,
     source_url: str | None = None,
     blocked_keywords: tuple[str, ...] = _BLOCKED_URL_KEYWORDS,
+    prefer_browser: bool = False,
+    max_fetches_per_candidate: int = _MAX_FETCHES_PER_CANDIDATE,
 ) -> Layer2Contract | None:
-    """Best-first crawl of the university site for this candidate.
-
-    Returns a contract with contacts as soon as an LLM/regex parse of a
-    page mentioning the person yields an email/phone; a contact-less
-    page_found contract if the person was seen but no contact surfaced;
-    None if the person was never found."""
+    """Best-first crawl of the site for this candidate: returns contacts as soon as found, else a contact-less page_found contract if the person was seen, else None."""
     target_last, target_first, target_patr = split_fio_parts(full_name)
     if not target_last or not target_first:
         return None
@@ -730,12 +709,11 @@ async def _smart_crawl_for_candidate(
     for template in _SEED_HOST_TEMPLATES:
         push(f"https://{template.format(domain=domain)}/", 15)
 
-    parser = YandexLLMParser()
     best_no_contact: Layer2Contract | None = None
     best_is_personal = False
     fetched = 0
 
-    while frontier and fetched < _MAX_FETCHES_PER_CANDIDATE:
+    while frontier and fetched < max_fetches_per_candidate:
         _, _, url = heapq.heappop(frontier)
         norm = _norm_url(url)
         if norm in visited:
@@ -744,12 +722,24 @@ async def _smart_crawl_for_candidate(
 
         html = state.pages.get(norm)
         if html is None:
-            if state.fetches >= _MAX_FETCHES_PER_DOMAIN:
-                break
-            state.fetches += 1
-            fetched += 1
-            html = await _fetch_page(url, crawler, client, request_delay_sec) or ""
-            state.pages[norm] = html
+            pending = state.pending.get(norm)
+            if pending is not None:
+                html = await pending  # another candidate's crawl is already fetching this exact URL
+            else:
+                if state.fetches >= _MAX_FETCHES_PER_DOMAIN:
+                    break
+                future: "asyncio.Future[str]" = asyncio.get_running_loop().create_future()
+                state.pending[norm] = future
+                state.fetches += 1
+                fetched += 1
+                try:
+                    html = await _fetch_page(
+                        url, crawler, client, request_delay_sec, prefer_browser=prefer_browser,
+                    ) or ""
+                    state.pages[norm] = html
+                finally:
+                    future.set_result(html)
+                    del state.pending[norm]
         if not html:
             continue
 
@@ -757,8 +747,6 @@ async def _smart_crawl_for_candidate(
         name_on_page = bool(loose_pattern.search(page_text))
 
         if name_on_page:
-            # The link right next to the FIO is almost certainly the
-            # personal page -- crawl it before anything else.
             for near in _links_near_name(html, url, domain, loose_pattern, blocked_keywords):
                 push(near, 200)
             try:
@@ -777,8 +765,6 @@ async def _smart_crawl_for_candidate(
                     confidence=parse_result.get("confidence", "medium"),
                     source_url=url,
                 )
-            # Prefer remembering the person's own card over a list/search
-            # page that merely links to it (?l=Г&PAGEN_1=6 and the like).
             page_is_personal = _is_personal_page(html, loose_pattern)
             if best_no_contact is None or (page_is_personal and not best_is_personal):
                 best_is_personal = page_is_personal
@@ -800,9 +786,7 @@ async def _smart_crawl_for_candidate(
     return best_no_contact
 
 
-# ---------------------------------------------------------------------------
-# Entry points
-# ---------------------------------------------------------------------------
+# --- Entry points ---
 
 
 async def crawl_and_parse_contact(
@@ -814,16 +798,13 @@ async def crawl_and_parse_contact(
     client: HttpClient | None = None,
     crawl_states: dict[str, "_DomainCrawlState"] | None = None,
     crawler: "Crawl4AICrawler | None" = None,
+    parser: "YandexLLMParser | None" = None,
     request_delay_sec: float = 0.0,
     blocked_keywords: tuple[str, ...] = _BLOCKED_URL_KEYWORDS,
+    prefer_browser: bool = False,
+    max_fetches_per_candidate: int = _MAX_FETCHES_PER_CANDIDATE,
 ) -> Layer2Contract:
-    """Crawl and parse contact info for a candidate.
-
-    `crawl_states`: shared, mutable per-domain crawl cache (see
-    `_DomainCrawlState`). Pass the SAME dict across every candidate call in
-    a batch (run_layer2 does this) so pages fetched for one candidate are
-    reused for the next instead of being re-downloaded.
-    """
+    """Single-candidate entry point. Pass a shared `crawl_states`/`parser` across a batch (run_layer2 does) to reuse fetched pages and avoid re-reading env vars per candidate."""
     if client is None:
         client = HttpClient(request_delay_sec=2.0)
 
@@ -843,15 +824,16 @@ async def crawl_and_parse_contact(
     crawl_contract = await _smart_crawl_for_candidate(
         candidate_id, full_name, university_domain, state,
         crawler if crawler is not None else Crawl4AICrawler(), client,
+        parser if parser is not None else YandexLLMParser(),
         request_delay_sec=request_delay_sec,
         source_url=source_url,
         blocked_keywords=blocked_keywords,
+        prefer_browser=prefer_browser,
+        max_fetches_per_candidate=max_fetches_per_candidate,
     )
     if crawl_contract is not None:
         return crawl_contract
     return Layer2Contract(candidate_id=candidate_id, crawl_status="page_not_found")
-
-
 
 
 def run_layer2(
@@ -863,20 +845,9 @@ def run_layer2(
     blocked_domain_keywords: list[str] | tuple[str, ...] = (),
     domain: str | None = None,
     limit: int = 100,
+    prefer_browser: bool = False,
+    max_fetches_per_candidate: int = _MAX_FETCHES_PER_CANDIDATE,
 ) -> None:
-    """Run Layer 2 crawling and parsing for candidates.
-
-    `blocked_domain_keywords`: extra words to add to the builtin URL
-    stop-list `_BLOCKED_URL_KEYWORDS` (news, gallery, login...); links whose
-    URL contains any of them are never fetched or followed.
-
-    `domain`: restrict to one university's domain (e.g. "utmn.ru") -- same
-    convention as run_layer1/export_xlsx/run_ingest, for testing/debugging
-    a single site without burning Crawl4AI/LLM calls on the rest of the DB.
-
-    `limit`: cap on how many candidates to process this call (default 100);
-    pass a smaller number for a quick smoke run.
-    """
     db_path = Path(db_path)
     with open_repository(db_path) as repo:
         sql = """
@@ -884,6 +855,7 @@ def run_layer2(
             FROM candidates c
             JOIN universities u ON c.university_id = u.university_id
             WHERE c.email IS NULL
+              AND c.contact_type IS NULL
               AND c.university_id IS NOT NULL
               AND u.domain IS NOT NULL
               AND c.match_status IN ('site_and_vak', 'site_and_vak_probable', 'site_no_vak')
@@ -920,6 +892,8 @@ def run_layer2(
         blocked_keywords=_BLOCKED_URL_KEYWORDS + tuple(
             w.lower() for w in blocked_domain_keywords
         ),
+        prefer_browser=prefer_browser,
+        max_fetches_per_candidate=max_fetches_per_candidate,
     ))
 
     _LOGGER.info("Layer 2 processing completed")
@@ -932,18 +906,14 @@ async def _run_layer2_candidates(
     request_delay_sec: float,
     workers: int,
     blocked_keywords: tuple[str, ...] = _BLOCKED_URL_KEYWORDS,
+    prefer_browser: bool = False,
+    max_fetches_per_candidate: int = _MAX_FETCHES_PER_CANDIDATE,
 ) -> None:
-    """Process every candidate concurrently, bounded by `workers` at a time,
-    sharing one browser instance and one per-domain crawl cache
-    (`crawl_states`) across all of them."""
-    # Shared across every candidate in this batch (see `_DomainCrawlState`):
-    # pages fetched for one candidate are reused for the next.
+    """Process every candidate concurrently (bounded by `workers`), sharing one browser, one per-domain crawl cache, and one parser across all of them."""
     crawl_states: dict[str, "_DomainCrawlState"] = {}
+    parser = YandexLLMParser()
     semaphore = asyncio.Semaphore(max(1, workers))
-    # sqlite3 writes aren't safe to interleave even across coroutines on one
-    # thread (one task's commit could land mid another's); this only
-    # serializes the (fast) write, not the (slow) crawl/parse work above it.
-    write_lock = asyncio.Lock()
+    write_lock = asyncio.Lock()  # sqlite3 writes aren't safe to interleave across coroutines
 
     with open_repository(db_path) as repo:
         async def process_one(cand: dict[str, Any], crawler: "Crawl4AICrawler | None", http_client: HttpClient) -> None:
@@ -957,12 +927,11 @@ async def _run_layer2_candidates(
                         client=http_client,
                         crawl_states=crawl_states,
                         crawler=crawler,
-                        # HttpClient itself is constructed with delay=0 below;
-                        # this is the single place the delay is applied now,
-                        # right after each real network fetch (see
-                        # _fetch_page), instead of once per candidate.
+                        parser=parser,
                         request_delay_sec=request_delay_sec,
                         blocked_keywords=blocked_keywords,
+                        prefer_browser=prefer_browser,
+                        max_fetches_per_candidate=max_fetches_per_candidate,
                     )
                 except Exception as e:
                     _LOGGER.error(f"Error processing candidate {cand['candidate_id']}: {e}")
@@ -977,17 +946,12 @@ async def _run_layer2_candidates(
                     contract.email,
                     contract.phone,
                     contract.contact_type,
-                    # Only record where a contact was actually found; a bare
-                    # "person seen here" URL (often a list page) is noise.
                     contract.source_url if (contract.email or contract.phone) else None,
                     contract.candidate_id,
                 ))
                 repo.conn.commit()
             _LOGGER.info(f"Processed {contract.candidate_id}: {contract.crawl_status}")
 
-        # request_delay_sec=0.0 here: HttpClient.get() has its own blocking
-        # time.sleep(request_delay_sec) internally, which would double up
-        # with the asyncio.sleep already applied in _fetch_page.
         with HttpClient(request_delay_sec=0.0) as http_client:
             if CRAWL4AI_AVAILABLE:
                 browser_config = BrowserConfig(ignore_https_errors=True, verbose=False)

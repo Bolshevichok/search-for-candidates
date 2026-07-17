@@ -11,14 +11,18 @@ run:
 limits:
   # Layer 1 settings
   request_delay_sec: 1.5
-  max_universities: null
+  max_universities: 5
   layer1_workers: 4
 
   # VAK settings
   vak_request_delay_sec: 0.0
-  vak_max_pages: null
+  vak_max_pages: 3
   vak_detail_workers: 8
 
   # Layer 2 settings (new)
-  layer2_workers: 6                  # Parallel workers for contact search
-  layer2_request_delay_sec: 2.0      # Delay between requests (seconds)
+  layer2_workers: 6
+  layer2_request_delay_sec: 2.0
+  layer2_prefer_browser: false
+  layer2_use_sitemap: true
+  layer2_use_site_search: true
+  layer2_max_fetches_per_candidate: 40

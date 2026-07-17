@@ -22,6 +22,7 @@ _PHONE_RE = re.compile(
   r"(?:\+7|8)[\s\-]?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}|\+\d{1,3}[\s\-]?\d{7,14}"
 )
 _SKIP_LINK_PARTS = (
+  "/blind/",
   "/sveden/struct",
   "/sveden/edustandarts",
   "/sveden/document",

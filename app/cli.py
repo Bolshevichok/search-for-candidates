@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
 
 from app.config import load_config
@@ -13,7 +14,6 @@ from app.sources.universities.layer1 import run_layer1
 from app.sources.universities.layer2 import run_layer2
 from app.sources.vak.pipeline import run_vak
 from app.sources.vk.browser import run_vk
-
 
 def _ensure_run(repo) -> int:
   existing = repo.find_resumable_run()
@@ -83,6 +83,16 @@ def cmd_step(args: argparse.Namespace) -> int:
         workers=cfg.limits.layer2_workers,
         domain=args.domain,
         limit=args.limit if args.limit is not None else cfg.limits.layer2_limit,
+        blocked_domain_keywords=cfg.limits.layer2_blocked_domain_keywords,
+        # getattr with defaults: older config.yaml files (and older pickled
+        # configs) don't have the new layer2 knobs yet.
+        prefer_browser=args.prefer_browser
+          or getattr(cfg.limits, "layer2_prefer_browser", False),
+        use_sitemap=getattr(cfg.limits, "layer2_use_sitemap", True),
+        use_site_search=getattr(cfg.limits, "layer2_use_site_search", True),
+        max_fetches_per_candidate=getattr(
+          cfg.limits, "layer2_max_fetches_per_candidate", 40
+        ),
       )
     elif args.step_name == "vk":
       run_vk(
@@ -103,7 +113,7 @@ def cmd_step(args: argparse.Namespace) -> int:
 
 def cmd_export(args: argparse.Namespace) -> int:
   out = Path(args.out)
-  with open_repository(args.db) as repo:
+  with open_repository(args.db, init=False) as repo:
     export_xlsx(repo, out, domain=args.domain)
   print(f"Exported to {out}")
   return 0
@@ -114,7 +124,7 @@ def cmd_status(args: argparse.Namespace) -> int:
   if not db_path.exists():
     print("Database not found.")
     return 0
-  with open_repository(args.db) as repo:
+  with open_repository(args.db, init=False) as repo:
     uni_ok = repo.execute(
       "SELECT COUNT(*) AS c FROM universities WHERE layer1_status = 'ok'"
     ).fetchone()["c"]
@@ -172,6 +182,12 @@ def build_parser() -> argparse.ArgumentParser:
     action="store_true",
     help="vk only: repeat previously checked candidate/community pairs",
   )
+  p_step.add_argument(
+    "--prefer-browser", action="store_true",
+    help="layer2 only: fetch every page through Crawl4AI first (old behavior). "
+         "Default is HTTP-first with browser escalation only on failures, "
+         "anti-bot challenges and JS-app shells -- much faster.",
+  )
   p_step.set_defaults(func=cmd_step)
 
   p_export = sub.add_parser("export", help="Export xlsx from database")
@@ -184,6 +200,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+  logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+  )
   parser = build_parser()
   args = parser.parse_args(argv)
   return args.func(args)

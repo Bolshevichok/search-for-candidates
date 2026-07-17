@@ -1,7 +1,16 @@
 limits:
   request_delay_sec: 1.0
   max_universities: 5
-  vak_max_pages: 5
+  vak_max_pages: 2
   layer1_workers: 4
   vak_request_delay_sec: 0.0
   vak_detail_workers: 8
+  layer2_blocked_domain_keywords: ["news", "novost", "press", "media",
+    "event", "sobyti", "anons", "afisha", "calendar", "kalendar",
+    "gallery", "galere", "photo", "foto", "video",
+    "blog", "forum", "arhiv", "archive",
+    "abitur", "priem", "admission", "postuplen",
+    "login", "signin", "signup", "logout", "authoriz", "avtoriz", "register",
+    "basket", "cart", "bitrix", "captcha",
+    "print=", "rss", "sitemap",
+    "sveden", "blind", "about", "feedback", "slep", "obrat", "otziv", "review"]
