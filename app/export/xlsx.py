@@ -27,7 +27,9 @@ SITE_COLUMNS = [
   "spec_experience",
   "email",
   "phone",
-  "contact_url",
+  "vk_profile",
+  "vk_email",
+  "vk_phone",
   "source_url",
 ]
 
@@ -42,7 +44,9 @@ SITE_HEADERS = [
   "Стаж по специальности, лет",
   "Электронная почта",
   "Телефон",
-  "Страница с контактами",
+  "VK профиль",
+  "VK: публичный e-mail",
+  "VK: публичный телефон",
   "Страница источника",
 ]
 
@@ -60,6 +64,9 @@ VAK_COLUMNS = [
   "org_address",
   "org_phone",
   "is_pilot",
+  "vk_profile",
+  "vk_email",
+  "vk_phone",
 ]
 
 VAK_HEADERS = [
@@ -76,6 +83,9 @@ VAK_HEADERS = [
   "Адрес организации",
   "Телефон организации",
   "Порядок присуждения степени",
+  "VK профиль",
+  "VK: публичный e-mail",
+  "VK: публичный телефон",
 ]
 
 MATCH_STATUS_LABELS = {
@@ -177,6 +187,29 @@ def _defense_fields(defense: dict[str, Any]) -> dict[str, Any]:
   }
 
 
+def _best_vk_profile(repo: Repository, candidate_id: str) -> dict[str, Any]:
+  rows = repo.execute(
+    """
+    SELECT p.*, vc.vk_url AS community_url
+    FROM candidate_vk_profiles p
+    JOIN university_vk_communities vc ON vc.community_id = p.community_id
+    WHERE p.candidate_id = ? AND p.profile_url <> ''
+    ORDER BY CASE p.vk_match_status
+      WHEN 'matched' THEN 0
+      WHEN 'ambiguous' THEN 1
+      WHEN 'not_found' THEN 2
+      ELSE 3 END,
+      p.checked_at DESC
+    """,
+    (candidate_id,),
+  ).fetchall()
+  if not rows:
+    return {}
+  profile = dict(rows[0])
+  profile["profile_url"] = "\n".join(dict.fromkeys(row["profile_url"] for row in rows))
+  return profile
+
+
 def export_xlsx(repo: Repository, output_path: Path, domain: str | None = None) -> Path:
   output_path.parent.mkdir(parents=True, exist_ok=True)
   wb = Workbook()
@@ -206,6 +239,7 @@ def export_xlsx(repo: Repository, output_path: Path, domain: str | None = None) 
     disciplines = json.loads(row["disciplines"] or "[]") if row["disciplines"] else []
     defense = _latest_defense(row["defenses"])
     vak_fields = _defense_fields(defense)
+    vk_profile = _best_vk_profile(repo, row["candidate_id"])
 
     if status in SITE_STATUSES:
       ws_site.append(
@@ -220,7 +254,9 @@ def export_xlsx(repo: Repository, output_path: Path, domain: str | None = None) 
           row["spec_experience"] if row["spec_experience"] is not None else "",
           row["email"] or "",
           row["phone"] or "",
-          row["contact_source_url"] or "",
+          vk_profile.get("profile_url") or "",
+          vk_profile.get("public_email") or "",
+          vk_profile.get("public_phone") or "",
           row["source_url"] or "",
         ]
       )
@@ -241,6 +277,9 @@ def export_xlsx(repo: Repository, output_path: Path, domain: str | None = None) 
           vak_fields["org_address"],
           vak_fields["org_phone"],
           _degree_award_process(vak_fields["is_pilot"]),
+          vk_profile.get("profile_url") or "",
+          vk_profile.get("public_email") or "",
+          vk_profile.get("public_phone") or "",
         ]
       )
 
@@ -295,44 +334,80 @@ def export_xlsx(repo: Repository, output_path: Path, domain: str | None = None) 
   ws_meta.append(
     [
       "ID запуска",
+      "Область выгрузки",
       "Начало",
       "Окончание",
       "Длительность",
       "Вузов обработано успешно",
       "Вузов с ошибками",
-      "Всего кандидатов",
-      "Есть на сайте и в ВАК",
-      "Вероятно есть на сайте и в ВАК",
-      "Есть в ВАК, нет на сайте",
-      "Есть на сайте, нет в ВАК",
+      "Всего кандидатов в выгрузке",
+      "Найдено VK-профилей в выгрузке",
+      "Есть на сайте и в ВАК в выгрузке",
+      "Вероятно есть на сайте и в ВАК в выгрузке",
+      "Есть в ВАК, нет на сайте в выгрузке",
+      "Есть на сайте, нет в ВАК в выгрузке",
     ]
   )
   run = repo.execute("SELECT * FROM runs ORDER BY run_id DESC LIMIT 1").fetchone()
   if run:
     finished_at = run["finished_at"] or datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    scope_params: list[Any] = []
+    if domain is not None:
+      scope_params.append(domain)
     ok = repo.execute(
-      "SELECT COUNT(*) AS c FROM universities WHERE layer1_status = 'ok'"
+      f"SELECT COUNT(*) AS c FROM universities WHERE layer1_status = 'ok'"
+      + (" AND domain = ?" if domain is not None else ""),
+      scope_params,
     ).fetchone()["c"]
-    err = repo.execute(
-      "SELECT COUNT(*) AS c FROM university_errors WHERE run_id = ?",
-      (run["run_id"],),
-    ).fetchone()["c"]
+    err_sql = """
+      SELECT COUNT(*) AS c
+      FROM university_errors ue
+      JOIN universities u ON u.university_id = ue.university_id
+      WHERE ue.run_id = ?
+    """
+    err_params: list[Any] = [run["run_id"]]
+    if domain is not None:
+      err_sql += " AND u.domain = ?"
+      err_params.append(domain)
+    err = repo.execute(err_sql, err_params).fetchone()["c"]
+    counts_sql = """
+      SELECT c.match_status, COUNT(*) AS c
+      FROM candidates c
+      LEFT JOIN universities u ON u.university_id = c.university_id
+    """
+    count_params: list[Any] = []
+    if domain is not None:
+      counts_sql += " WHERE u.domain = ?"
+      count_params.append(domain)
+    counts_sql += " GROUP BY c.match_status"
     counts = {
       row["match_status"]: row["c"]
-      for row in repo.execute(
-        "SELECT match_status, COUNT(*) AS c FROM candidates GROUP BY match_status"
-      ).fetchall()
+      for row in repo.execute(counts_sql, count_params).fetchall()
     }
     total = sum(counts.values())
+    vk_sql = """
+      SELECT COUNT(DISTINCT p.candidate_id) AS c
+      FROM candidate_vk_profiles p
+      JOIN candidates c ON c.candidate_id = p.candidate_id
+      JOIN universities u ON u.university_id = c.university_id
+      WHERE p.vk_match_status = 'matched'
+    """
+    vk_params: list[Any] = []
+    if domain is not None:
+      vk_sql += " AND u.domain = ?"
+      vk_params.append(domain)
+    vk_matches = repo.execute(vk_sql, vk_params).fetchone()["c"]
     ws_meta.append(
       [
         run["run_id"],
+        domain or "все вузы",
         run["started_at"],
         finished_at,
         _format_duration(run["started_at"], finished_at),
         ok,
         err,
         total,
+        vk_matches,
         counts.get("site_and_vak", 0),
         counts.get("site_and_vak_probable", 0),
         counts.get("vak_no_site", 0),

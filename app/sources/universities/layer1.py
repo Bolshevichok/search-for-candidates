@@ -55,9 +55,6 @@ def _itemprop_text(block: Any, name: str) -> str | None:
 
 
 def _scoped_contact(block: Any, itemprop_name: str, pattern: re.Pattern[str]) -> str | None:
-  """Look for a contact value only inside this person's own markup block,
-  never the full page text (same rule layer2 used to apply on its own
-  re-fetch of this page)."""
   explicit = _itemprop_text(block, itemprop_name)
   if explicit:
     match = pattern.search(explicit)

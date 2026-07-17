@@ -29,6 +29,11 @@ class Limits:
   # Probe and use the site's internal search endpoint for the surname.
   layer2_use_site_search: bool = True
   layer2_max_fetches_per_candidate: int = 40
+  vk_workers: int = 1
+  vk_request_delay_sec: float = 0.15
+  vk_limit: int = 100
+  vk_extract_public_contacts: bool = False
+  vk_enabled: bool = False
 
 
 @dataclass
@@ -56,12 +61,17 @@ def load_config(config_path: Path | str = "config.yaml") -> AppConfig:
       vak_detail_workers=int(limits_raw.get("vak_detail_workers", 8)),
       layer2_workers=int(limits_raw.get("layer2_workers", 2)),
       layer2_request_delay_sec=float(limits_raw.get("layer2_request_delay_sec", 2.0)),
-      layer2_limit=int(limits_raw.get("layer2_limit", 100)),
+      layer2_limit=int(limits_raw.get("layer2_limit", 350)),
       layer2_blocked_domain_keywords=list(limits_raw.get("layer2_blocked_domain_keywords", [])),
       layer2_prefer_browser=bool(limits_raw.get("layer2_prefer_browser", False)),
       layer2_use_sitemap=bool(limits_raw.get("layer2_use_sitemap", True)),
       layer2_use_site_search=bool(limits_raw.get("layer2_use_site_search", True)),
       layer2_max_fetches_per_candidate=int(limits_raw.get("layer2_max_fetches_per_candidate", 40)),
+      vk_workers=int(limits_raw.get("vk_workers", 1)),
+      vk_request_delay_sec=float(limits_raw.get("vk_request_delay_sec", 0.15)),
+      vk_limit=int(limits_raw.get("vk_limit", 100)),
+      vk_extract_public_contacts=bool(limits_raw.get("vk_extract_public_contacts", False)),
+      vk_enabled=bool(limits_raw.get("vk_enabled", False)),
     ),
   )
   return cfg

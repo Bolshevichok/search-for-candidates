@@ -1,6 +1,12 @@
 limits:
-  request_delay_sec: 1.5
-  max_universities: null
-  layer1_workers: 4
+  request_delay_sec: 0.5
+  max_universities: 50
+  layer1_workers: 30
   vak_request_delay_sec: 0.0
-  vak_detail_workers: 8
+  vak_detail_workers: 100
+  vak_max_pages: 11
+  vk_enabled: true
+  vk_workers: 10
+  vk_request_delay_sec: 0.15
+  vk_limit: 10000
+  vk_extract_public_contacts: true

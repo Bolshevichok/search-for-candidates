@@ -1,0 +1,7 @@
+# VK enrichment is opt-in and uses the public mobile members UI, never the API.
+limits:
+  vk_enabled: false
+  vk_workers: 10
+  vk_request_delay_sec: 0.15
+  vk_limit: 100
+  vk_extract_public_contacts: true
