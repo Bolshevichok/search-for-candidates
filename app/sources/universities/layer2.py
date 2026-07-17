@@ -656,15 +656,15 @@ def _score_link(
     low = unquote(url).lower()
     anchor_low = anchor.lower()
     last_low = target_last.lower()
-    if name_pattern is not None and name_pattern.search(anchor):
+    if name_pattern is not None and name_pattern.search(anchor): # URL совпадает с ФИО
         score += 120
-    elif last_low and (last_low in anchor_low or last_low in low):
+    elif last_low and (last_low in anchor_low or last_low in low): # Фамилия в URL или тексте ссылки
         score += 100
-    if any(t in low for t in translit_variants):
+    if any(t in low for t in translit_variants): # Фамилия в транслите в URL (суммируется)
         score += 80
-    if any(k in low or k in anchor_low for k in _STAFF_KEYWORDS):
+    if any(k in low or k in anchor_low for k in _STAFF_KEYWORDS): # На странице встречется приоритет ворд
         score += 30
-    if _PAGINATION_RE.search(low):
+    if _PAGINATION_RE.search(low): # Если ссылка похожа на пагинацию ?page=2, /page/3
         score += 10
     return score
 
