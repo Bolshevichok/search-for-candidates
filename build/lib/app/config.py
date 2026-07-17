@@ -19,16 +19,8 @@ class Limits:
   vak_detail_workers: int = 8
   layer2_workers: int = 2
   layer2_request_delay_sec: float = 2.0
-  layer2_limit: int = 350
+  layer2_limit: int = 100
   layer2_blocked_domain_keywords: list[str] = field(default_factory=list)
-  # True: every layer2 page goes through Crawl4AI first (old, slow behavior).
-  # False (default): HTTP-first, browser only for failures/challenges/JS shells.
-  layer2_prefer_browser: bool = False
-  # Seed each candidate's frontier with scored /sitemap.xml URLs.
-  layer2_use_sitemap: bool = True
-  # Probe and use the site's internal search endpoint for the surname.
-  layer2_use_site_search: bool = True
-  layer2_max_fetches_per_candidate: int = 40
 
 
 @dataclass
@@ -58,10 +50,6 @@ def load_config(config_path: Path | str = "config.yaml") -> AppConfig:
       layer2_request_delay_sec=float(limits_raw.get("layer2_request_delay_sec", 2.0)),
       layer2_limit=int(limits_raw.get("layer2_limit", 100)),
       layer2_blocked_domain_keywords=list(limits_raw.get("layer2_blocked_domain_keywords", [])),
-      layer2_prefer_browser=bool(limits_raw.get("layer2_prefer_browser", False)),
-      layer2_use_sitemap=bool(limits_raw.get("layer2_use_sitemap", True)),
-      layer2_use_site_search=bool(limits_raw.get("layer2_use_site_search", True)),
-      layer2_max_fetches_per_candidate=int(limits_raw.get("layer2_max_fetches_per_candidate", 40)),
     ),
   )
   return cfg
