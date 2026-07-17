@@ -448,7 +448,7 @@ def _name_part_regex(part: str) -> str:
         "[еёЕЁ]" if ch in "еёЕЁ" else re.escape(ch) for ch in part
     )
 
-#
+# 
 def _build_loose_name_pattern(
     last: str, first: str, patronymic: str | None, *, strict: bool = False
 ) -> re.Pattern[str] | None:

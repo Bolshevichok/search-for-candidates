@@ -21,7 +21,7 @@ _MOBILE_UA = (
   "Mozilla/5.0 (Linux; Android 11; Mobile) AppleWebKit/537.36 "
   "(KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
 )
-_MEMBER_COUNT_RE = re.compile(r"([\d\s\u00a0]+)\s+ПОДПИСЧИК", re.I)
+_MEMBER_COUNT_RE = re.compile(r"(\d[\d\s\u00a0]*)\s+ПОДПИСЧИК", re.I)
 _EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
 _PHONE_RE = re.compile(r"^\+?[0-9()\-\s]{7,}$")
 
@@ -232,7 +232,7 @@ class VkMobileMemberSearcher:
         if self.extract_public_contacts:
           try:
             email, phone = self._public_contacts(member.profile_url)
-          except Exception as exc: 
+          except Exception as exc:
             _LOGGER.info("Could not read public contacts on %s: %s", member.profile_url, type(exc).__name__)
         results.append(VkProfileResult(
           task.candidate_id,
@@ -283,7 +283,7 @@ def _search_community(
       extract_public_contacts=extract_public_contacts,
     ) as searcher:
       return searcher.search_community(tasks)
-  except Exception as exc:  
+  except Exception as exc:
     _LOGGER.warning("VK community scan error for %s: %s", tasks[0].vk_url if tasks else "?", exc)
     return [VkProfileResult(task.candidate_id, task.community_id, None, "error", mobile_members_url(task.vk_url)) for task in tasks]
 

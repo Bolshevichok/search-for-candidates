@@ -33,7 +33,7 @@ python -m app status
 python -m app reset
 
 # Создать XLSX из уже собранных данных
-python -m app export --out output/candidates.xlsx  
+python -m app export --out output/candidates.xlsx
 ```
 
 ## Обогощение записей контактами
@@ -69,7 +69,7 @@ python -m app --domain utmn.ru step vk --limit 20
 
 ### Приложение `app/`
 
-Здесь находится основной код, который запускается для парсинга сайтов университетов, ВАК и ВК. 
+Здесь находится основной код, который запускается для парсинга сайтов университетов, ВАК и ВК.
 
 Файлы `__init__.py` в папках нужны Python, чтобы считать их частями одного приложения.
 
