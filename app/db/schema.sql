@@ -103,7 +103,7 @@ CREATE TABLE IF NOT EXISTS university_vk_communities (
 CREATE TABLE IF NOT EXISTS candidate_vk_profiles (
     candidate_id TEXT NOT NULL REFERENCES candidates(candidate_id),
     community_id INTEGER NOT NULL REFERENCES university_vk_communities(community_id),
-    profile_url TEXT,
+    profile_url TEXT NOT NULL DEFAULT '',
     vk_match_status TEXT NOT NULL CHECK (
         vk_match_status IN ('matched', 'ambiguous', 'not_found', 'error')
     ),
@@ -111,7 +111,7 @@ CREATE TABLE IF NOT EXISTS candidate_vk_profiles (
     public_phone TEXT,
     evidence_url TEXT,
     checked_at TEXT NOT NULL,
-    PRIMARY KEY (candidate_id, community_id)
+    PRIMARY KEY (candidate_id, community_id, profile_url)
 );
 
 CREATE TABLE IF NOT EXISTS possible_namesakes (

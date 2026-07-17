@@ -56,7 +56,7 @@ class VkProfileResult:
     return {
       "candidate_id": self.candidate_id,
       "community_id": self.community_id,
-      "profile_url": self.profile_url,
+      "profile_url": self.profile_url or "",
       "vk_match_status": self.vk_match_status,
       "public_email": self.public_email,
       "public_phone": self.public_phone,
@@ -215,7 +215,16 @@ class VkMobileMemberSearcher:
       if not matches:
         results.append(VkProfileResult(task.candidate_id, task.community_id, None, "not_found", first_url))
       elif len(matches) > 1:
-        results.append(VkProfileResult(task.candidate_id, task.community_id, None, "ambiguous", matches[0].page_url))
+        results.extend(
+          VkProfileResult(
+            task.candidate_id,
+            task.community_id,
+            member.profile_url,
+            "ambiguous",
+            member.page_url,
+          )
+          for member in matches
+        )
       else:
         member = matches[0]
         email = None
@@ -244,14 +253,18 @@ def _load_tasks(db_path: Path, *, domain: str | None, limit: int, refresh: bool)
       FROM candidates c
       JOIN universities u ON u.university_id = c.university_id
       JOIN university_vk_communities vc ON vc.university_id = u.university_id AND vc.active = 1
-      LEFT JOIN candidate_vk_profiles p
-        ON p.candidate_id = c.candidate_id AND p.community_id = vc.community_id
       WHERE c.university_id IS NOT NULL
         AND c.match_status IN ('site_and_vak', 'site_and_vak_probable', 'site_no_vak', 'vak_no_site')
     """
     params: list[Any] = []
     if not refresh:
-      sql += " AND p.candidate_id IS NULL"
+      sql += """
+        AND NOT EXISTS (
+          SELECT 1
+          FROM candidate_vk_profiles p
+          WHERE p.candidate_id = c.candidate_id AND p.community_id = vc.community_id
+        )
+      """
     if domain:
       sql += " AND u.domain = ?"
       params.append(domain)
@@ -315,6 +328,13 @@ def run_vk(
       results.extend(future.result())
 
   with open_repository(path) as repo:
+    if refresh:
+      for task in tasks:
+        repo.execute(
+          "DELETE FROM candidate_vk_profiles WHERE candidate_id = ? AND community_id = ?",
+          (task.candidate_id, task.community_id),
+        )
+      repo.commit()
     for result in results:
       repo.upsert_candidate_vk_profile(result.as_record())
   counts: dict[str, int] = {}

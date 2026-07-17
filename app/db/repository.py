@@ -178,7 +178,7 @@ class Repository:
         candidate_id, community_id, profile_url, vk_match_status,
         public_email, public_phone, evidence_url, checked_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(candidate_id, community_id) DO UPDATE SET
+      ON CONFLICT DO UPDATE SET
         profile_url = excluded.profile_url,
         vk_match_status = excluded.vk_match_status,
         public_email = excluded.public_email,

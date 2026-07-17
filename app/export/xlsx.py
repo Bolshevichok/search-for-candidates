@@ -188,23 +188,26 @@ def _defense_fields(defense: dict[str, Any]) -> dict[str, Any]:
 
 
 def _best_vk_profile(repo: Repository, candidate_id: str) -> dict[str, Any]:
-  row = repo.execute(
+  rows = repo.execute(
     """
     SELECT p.*, vc.vk_url AS community_url
     FROM candidate_vk_profiles p
     JOIN university_vk_communities vc ON vc.community_id = p.community_id
-    WHERE p.candidate_id = ? AND p.profile_url IS NOT NULL
+    WHERE p.candidate_id = ? AND p.profile_url <> ''
     ORDER BY CASE p.vk_match_status
       WHEN 'matched' THEN 0
       WHEN 'ambiguous' THEN 1
       WHEN 'not_found' THEN 2
       ELSE 3 END,
       p.checked_at DESC
-    LIMIT 1
     """,
     (candidate_id,),
-  ).fetchone()
-  return dict(row) if row else {}
+  ).fetchall()
+  if not rows:
+    return {}
+  profile = dict(rows[0])
+  profile["profile_url"] = "\n".join(dict.fromkeys(row["profile_url"] for row in rows))
+  return profile
 
 
 def export_xlsx(repo: Repository, output_path: Path, domain: str | None = None) -> Path:
